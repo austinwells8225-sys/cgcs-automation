@@ -1,6 +1,7 @@
 import json
 import logging
 import re
+import time
 from datetime import datetime
 
 from langchain_anthropic import ChatAnthropic
@@ -23,20 +24,53 @@ llm = ChatAnthropic(
     model=settings.claude_model,
     api_key=settings.anthropic_api_key,
     max_tokens=1024,
+    timeout=settings.llm_timeout,
 )
 
 
 def _parse_json_response(text: str) -> dict:
     """Extract and parse JSON from LLM response, handling markdown code blocks."""
-    # Strip markdown code fences if present
     match = re.search(r"```(?:json)?\s*([\s\S]*?)```", text)
     if match:
         text = match.group(1)
     return json.loads(text.strip())
 
 
+def _invoke_with_retry(messages: list[dict]) -> str:
+    """Invoke LLM with exponential backoff retry on transient failures."""
+    last_error = None
+    for attempt in range(settings.llm_max_retries):
+        try:
+            response = llm.invoke(messages)
+            return response.content
+        except Exception as e:
+            last_error = e
+            if attempt < settings.llm_max_retries - 1:
+                delay = settings.llm_retry_base_delay * (2 ** attempt)
+                logger.warning(
+                    "LLM call failed (attempt %d/%d), retrying in %.1fs: %s",
+                    attempt + 1, settings.llm_max_retries, delay, e,
+                )
+                time.sleep(delay)
+            else:
+                logger.error("LLM call failed after %d attempts: %s", settings.llm_max_retries, e)
+    raise last_error
+
+
+def _sanitize_string(value: str | None) -> str:
+    """Strip control characters and excessive whitespace from input strings."""
+    if not value:
+        return ""
+    # Remove control characters except newlines and tabs
+    cleaned = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]", "", value)
+    # Collapse excessive whitespace
+    cleaned = re.sub(r"[ \t]+", " ", cleaned)
+    # Limit length to prevent abuse
+    return cleaned[:5000].strip()
+
+
 def validate_input(state: ReservationState) -> dict:
-    """Validate all required fields. Pure Python, no LLM call."""
+    """Validate and sanitize all required fields. Pure Python, no LLM call."""
     errors: list[str] = []
 
     # Required fields
@@ -44,6 +78,14 @@ def validate_input(state: ReservationState) -> dict:
                   "requested_date", "requested_start_time", "requested_end_time"]:
         if not state.get(field):
             errors.append(f"Missing required field: {field}")
+
+    # Sanitize string inputs
+    sanitized = {}
+    for field in ["requester_name", "requester_email", "requester_organization",
+                  "event_name", "event_description", "setup_requirements_raw"]:
+        raw = state.get(field)
+        if raw:
+            sanitized[field] = _sanitize_string(str(raw))
 
     # Date format
     if state.get("requested_date"):
@@ -80,25 +122,29 @@ def validate_input(state: ReservationState) -> dict:
     if room and room not in ROOM_CONFIGS:
         errors.append(f"Unknown room type: {room}. Valid types: {', '.join(ROOM_CONFIGS.keys())}")
 
-    return {"errors": errors}
+    # Request ID format check (prevent injection via request_id)
+    request_id = state.get("request_id", "")
+    if request_id and not re.match(r"^[a-zA-Z0-9_-]{1,64}$", request_id):
+        errors.append("Invalid request_id format. Use alphanumeric, hyphens, underscores only.")
+
+    return {**sanitized, "errors": errors}
 
 
 def evaluate_eligibility(state: ReservationState) -> dict:
     """Use Claude to evaluate whether the request meets CGCS eligibility criteria."""
     user_message = (
-        f"Organization: {state.get('requester_organization', 'Not specified')}\n"
-        f"Event Name: {state['event_name']}\n"
-        f"Event Description: {state.get('event_description', 'Not provided')}\n"
-        f"Requester: {state['requester_name']} ({state['requester_email']})"
+        f"Organization: {_sanitize_string(state.get('requester_organization', 'Not specified'))}\n"
+        f"Event Name: {_sanitize_string(state.get('event_name', ''))}\n"
+        f"Event Description: {_sanitize_string(state.get('event_description', 'Not provided'))}\n"
+        f"Requester: {_sanitize_string(state.get('requester_name', ''))} ({state.get('requester_email', '')})"
     )
 
-    response = llm.invoke([
-        {"role": "system", "content": ELIGIBILITY_SYSTEM_PROMPT},
-        {"role": "user", "content": user_message},
-    ])
-
     try:
-        result = _parse_json_response(response.content)
+        content = _invoke_with_retry([
+            {"role": "system", "content": ELIGIBILITY_SYSTEM_PROMPT},
+            {"role": "user", "content": user_message},
+        ])
+        result = _parse_json_response(content)
         return {
             "is_eligible": result["is_eligible"],
             "eligibility_reason": result["reason"],
@@ -112,33 +158,36 @@ def evaluate_eligibility(state: ReservationState) -> dict:
             "errors": state.get("errors", []) + ["Eligibility evaluation failed"],
             "decision": "needs_review",
         }
+    except Exception as e:
+        logger.error("Eligibility evaluation failed after retries: %s", e)
+        return {
+            "is_eligible": None,
+            "eligibility_reason": f"AI evaluation unavailable: {type(e).__name__}",
+            "errors": state.get("errors", []) + [f"Eligibility LLM call failed: {e}"],
+            "decision": "needs_review",
+        }
 
 
 def determine_pricing(state: ReservationState) -> dict:
     """Use Claude to classify pricing tier and compute cost."""
     user_message = (
-        f"Organization: {state.get('requester_organization', 'Not specified')}\n"
-        f"Event Name: {state['event_name']}\n"
-        f"Event Description: {state.get('event_description', 'Not provided')}\n"
+        f"Organization: {_sanitize_string(state.get('requester_organization', 'Not specified'))}\n"
+        f"Event Name: {_sanitize_string(state.get('event_name', ''))}\n"
+        f"Event Description: {_sanitize_string(state.get('event_description', 'Not provided'))}\n"
         f"Suggested Tier from Eligibility Check: {state.get('pricing_tier', 'Not determined')}"
     )
 
-    response = llm.invoke([
-        {"role": "system", "content": PRICING_SYSTEM_PROMPT},
-        {"role": "user", "content": user_message},
-    ])
-
     try:
-        result = _parse_json_response(response.content)
+        content = _invoke_with_retry([
+            {"role": "system", "content": PRICING_SYSTEM_PROMPT},
+            {"role": "user", "content": user_message},
+        ])
+        result = _parse_json_response(content)
         tier = result["pricing_tier"]
         if tier not in PRICING_TIERS:
-            tier = "external"  # Default to highest tier if unknown
+            tier = "external"
 
-        cost = compute_cost(
-            tier,
-            state["requested_start_time"],
-            state["requested_end_time"],
-        )
+        cost = compute_cost(tier, state["requested_start_time"], state["requested_end_time"])
 
         return {
             "pricing_tier": tier,
@@ -151,6 +200,13 @@ def determine_pricing(state: ReservationState) -> dict:
             "estimated_cost": 0.0,
             "errors": state.get("errors", []) + ["Pricing determination had issues"],
         }
+    except Exception as e:
+        logger.error("Pricing determination failed after retries: %s", e)
+        return {
+            "pricing_tier": state.get("pricing_tier", "external"),
+            "estimated_cost": 0.0,
+            "errors": state.get("errors", []) + [f"Pricing LLM call failed: {e}"],
+        }
 
 
 def evaluate_room_setup(state: ReservationState) -> dict:
@@ -158,14 +214,13 @@ def evaluate_room_setup(state: ReservationState) -> dict:
     room_key = state.get("room_requested") or "multipurpose"
     room = ROOM_CONFIGS.get(room_key, ROOM_CONFIGS["multipurpose"])
 
-    # Check if room can fit attendees, suggest alternative if not
     attendees = state.get("estimated_attendees", 0) or 0
     suitable_room = find_suitable_room(attendees, room_key)
     if suitable_room and suitable_room != room_key:
         room_key = suitable_room
         room = ROOM_CONFIGS[room_key]
 
-    setup_raw = state.get("setup_requirements_raw", "Standard setup")
+    setup_raw = _sanitize_string(state.get("setup_requirements_raw", "Standard setup"))
     prompt = SETUP_SYSTEM_PROMPT.format(
         room_name=room["display_name"],
         max_capacity=room["max_capacity"],
@@ -176,16 +231,15 @@ def evaluate_room_setup(state: ReservationState) -> dict:
     user_message = (
         f"Setup requirements: {setup_raw}\n"
         f"Estimated attendees: {attendees}\n"
-        f"Event: {state['event_name']}"
+        f"Event: {_sanitize_string(state.get('event_name', ''))}"
     )
 
-    response = llm.invoke([
-        {"role": "system", "content": prompt},
-        {"role": "user", "content": user_message},
-    ])
-
     try:
-        result = _parse_json_response(response.content)
+        content = _invoke_with_retry([
+            {"role": "system", "content": prompt},
+            {"role": "user", "content": user_message},
+        ])
+        result = _parse_json_response(content)
         final_room = room_key
         if not result.get("room_suitable", True) and result.get("alternative_room"):
             final_room = result["alternative_room"]
@@ -196,10 +250,10 @@ def evaluate_room_setup(state: ReservationState) -> dict:
         }
     except (json.JSONDecodeError, KeyError) as e:
         logger.error("Failed to parse room setup response: %s", e)
-        return {
-            "room_assignment": room_key,
-            "setup_config": {},
-        }
+        return {"room_assignment": room_key, "setup_config": {}}
+    except Exception as e:
+        logger.error("Room setup evaluation failed after retries: %s", e)
+        return {"room_assignment": room_key, "setup_config": {}}
 
 
 def draft_approval_response(state: ReservationState) -> dict:
@@ -208,47 +262,55 @@ def draft_approval_response(state: ReservationState) -> dict:
     room_name = ROOM_CONFIGS.get(room_key, {}).get("display_name", room_key)
 
     prompt = APPROVAL_RESPONSE_SYSTEM_PROMPT.format(
-        requester_name=state["requester_name"],
-        organization=state.get("requester_organization", "Not specified"),
-        event_name=state["event_name"],
-        requested_date=state["requested_date"],
-        start_time=state["requested_start_time"],
-        end_time=state["requested_end_time"],
+        requester_name=_sanitize_string(state.get("requester_name", "")),
+        organization=_sanitize_string(state.get("requester_organization", "Not specified")),
+        event_name=_sanitize_string(state.get("event_name", "")),
+        requested_date=state.get("requested_date", ""),
+        start_time=state.get("requested_start_time", ""),
+        end_time=state.get("requested_end_time", ""),
         room_name=room_name,
         setup_details=json.dumps(state.get("setup_config", {}), indent=2),
         pricing_tier=state.get("pricing_tier", "external"),
         estimated_cost=state.get("estimated_cost", 0),
     )
 
-    response = llm.invoke([
-        {"role": "system", "content": prompt},
-        {"role": "user", "content": "Draft the approval email now."},
-    ])
-
-    return {
-        "draft_response": response.content,
-        "decision": "approve",
-    }
+    try:
+        content = _invoke_with_retry([
+            {"role": "system", "content": prompt},
+            {"role": "user", "content": "Draft the approval email now."},
+        ])
+        return {"draft_response": content, "decision": "approve"}
+    except Exception as e:
+        logger.error("Draft approval failed after retries: %s", e)
+        return {
+            "draft_response": None,
+            "decision": "needs_review",
+            "errors": state.get("errors", []) + [f"Draft approval LLM call failed: {e}"],
+        }
 
 
 def draft_rejection(state: ReservationState) -> dict:
     """Use Claude to draft a rejection email."""
     prompt = REJECTION_RESPONSE_SYSTEM_PROMPT.format(
-        requester_name=state["requester_name"],
-        organization=state.get("requester_organization", "Not specified"),
-        event_name=state["event_name"],
+        requester_name=_sanitize_string(state.get("requester_name", "")),
+        organization=_sanitize_string(state.get("requester_organization", "Not specified")),
+        event_name=_sanitize_string(state.get("event_name", "")),
         rejection_reason=state.get("eligibility_reason", "Does not meet eligibility criteria"),
     )
 
-    response = llm.invoke([
-        {"role": "system", "content": prompt},
-        {"role": "user", "content": "Draft the rejection email now."},
-    ])
-
-    return {
-        "draft_response": response.content,
-        "decision": "reject",
-    }
+    try:
+        content = _invoke_with_retry([
+            {"role": "system", "content": prompt},
+            {"role": "user", "content": "Draft the rejection email now."},
+        ])
+        return {"draft_response": content, "decision": "reject"}
+    except Exception as e:
+        logger.error("Draft rejection failed after retries: %s", e)
+        return {
+            "draft_response": None,
+            "decision": "needs_review",
+            "errors": state.get("errors", []) + [f"Draft rejection LLM call failed: {e}"],
+        }
 
 
 def handle_error(state: ReservationState) -> dict:

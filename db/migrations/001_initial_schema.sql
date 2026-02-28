@@ -89,12 +89,28 @@ CREATE TABLE cgcs.room_configurations (
     google_calendar_id VARCHAR(255) NOT NULL
 );
 
+-- Dead letter queue for failed processing
+CREATE TABLE cgcs.dead_letter_queue (
+    id BIGSERIAL PRIMARY KEY,
+    request_id VARCHAR(64),
+    payload JSONB NOT NULL,
+    error_message TEXT NOT NULL,
+    error_type VARCHAR(100) NOT NULL,
+    failure_count INTEGER DEFAULT 1,
+    status VARCHAR(20) DEFAULT 'pending', -- 'pending', 'resolved', 'expired'
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    resolved_at TIMESTAMPTZ,
+    resolved_by VARCHAR(100)
+);
+
 -- Indexes
 CREATE INDEX idx_reservations_status ON cgcs.reservations(status);
 CREATE INDEX idx_reservations_date ON cgcs.reservations(requested_date);
 CREATE INDEX idx_reservations_email ON cgcs.reservations(requester_email);
 CREATE INDEX idx_audit_trail_reservation ON cgcs.audit_trail(reservation_id);
 CREATE INDEX idx_audit_trail_created ON cgcs.audit_trail(created_at);
+CREATE INDEX idx_dead_letter_status ON cgcs.dead_letter_queue(status);
+CREATE INDEX idx_dead_letter_request ON cgcs.dead_letter_queue(request_id);
 
 -- Updated_at trigger
 CREATE OR REPLACE FUNCTION cgcs.update_updated_at()

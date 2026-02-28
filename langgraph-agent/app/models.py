@@ -3,22 +3,22 @@ from decimal import Decimal
 from typing import Optional
 from uuid import UUID
 
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, Field
 
 
 class EvaluateRequest(BaseModel):
-    request_id: str
-    requester_name: str
+    request_id: str = Field(max_length=64, pattern=r"^[a-zA-Z0-9_-]+$")
+    requester_name: str = Field(max_length=255)
     requester_email: EmailStr
-    requester_organization: Optional[str] = None
-    event_name: str
-    event_description: Optional[str] = None
+    requester_organization: Optional[str] = Field(None, max_length=255)
+    event_name: str = Field(max_length=500)
+    event_description: Optional[str] = Field(None, max_length=5000)
     requested_date: date
     requested_start_time: time
     requested_end_time: time
-    room_requested: Optional[str] = None
-    estimated_attendees: Optional[int] = None
-    setup_requirements_raw: Optional[str] = None
+    room_requested: Optional[str] = Field(None, max_length=50)
+    estimated_attendees: Optional[int] = Field(None, ge=1, le=500)
+    setup_requirements_raw: Optional[str] = Field(None, max_length=5000)
     calendar_available: bool
 
 
@@ -36,9 +36,9 @@ class EvaluateResponse(BaseModel):
 
 
 class ApproveRequest(BaseModel):
-    action: str  # 'approve' or 'reject'
-    admin_notes: Optional[str] = None
-    edited_response: Optional[str] = None
+    action: str = Field(pattern=r"^(approve|reject)$")
+    admin_notes: Optional[str] = Field(None, max_length=2000)
+    edited_response: Optional[str] = Field(None, max_length=10000)
 
 
 class ReservationDetail(BaseModel):

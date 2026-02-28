@@ -37,6 +37,9 @@ services:
       - DB_POSTGRESDB_PASSWORD=${POSTGRES_PASSWORD}
       - N8N_ENCRYPTION_KEY=${N8N_ENCRYPTION_KEY}
       - GENERIC_TIMEZONE=America/Chicago
+      - WEBHOOK_SECRET=${WEBHOOK_SECRET}
+      - LANGGRAPH_API_KEY=${LANGGRAPH_API_KEY}
+      - ADMIN_EMAIL=${ADMIN_EMAIL}
     volumes:
       - n8n_data:/home/node/.n8n
     depends_on:
@@ -54,8 +57,13 @@ services:
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
       - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
       - LANGGRAPH_API_KEY=${LANGGRAPH_API_KEY}
+      - WEBHOOK_SECRET=${WEBHOOK_SECRET}
+      - ADMIN_EMAIL=${ADMIN_EMAIL}
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
       - ENVIRONMENT=${ENVIRONMENT:-production}
+      - LLM_TIMEOUT=${LLM_TIMEOUT:-60}
+      - LLM_MAX_RETRIES=${LLM_MAX_RETRIES:-3}
+      - DEAD_LETTER_MAX_FAILURES=${DEAD_LETTER_MAX_FAILURES:-3}
     depends_on:
       postgres:
         condition: service_healthy

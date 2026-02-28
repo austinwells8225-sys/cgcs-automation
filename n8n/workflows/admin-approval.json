@@ -30,26 +30,27 @@
       "parameters": {
         "method": "POST",
         "url": "=http://langgraph-agent:8000/api/v1/approve/{{ $json.request_id }}",
-        "authentication": "genericCredentialType",
-        "genericAuthType": "httpHeaderAuth",
         "sendBody": true,
         "specifyBody": "json",
         "jsonBody": "={{ JSON.stringify({ action: $json.action, admin_notes: $json.admin_notes, edited_response: $json.edited_response }) }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.LANGGRAPH_API_KEY }}"
+            }
+          ]
+        },
         "options": {
-          "timeout": 15000
+          "timeout": 60000
         }
       },
       "id": "update-reservation",
       "name": "Update Reservation Status",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [680, 300],
-      "credentials": {
-        "httpHeaderAuth": {
-          "id": "CONFIGURE_IN_N8N",
-          "name": "LangGraph Agent API Key"
-        }
-      }
+      "position": [680, 300]
     },
     {
       "parameters": {

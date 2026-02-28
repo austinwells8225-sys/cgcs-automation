@@ -3,7 +3,28 @@
 from unittest.mock import MagicMock, patch
 
 from app.graph.edges import after_eligibility, after_validation
-from app.graph.nodes import handle_error, validate_input
+from app.graph.nodes import _sanitize_string, handle_error, validate_input
+
+
+class TestSanitizeString:
+    def test_strips_control_characters(self):
+        assert _sanitize_string("hello\x00world\x07") == "helloworld"
+
+    def test_preserves_newlines_and_tabs(self):
+        assert _sanitize_string("hello\nworld") == "hello\nworld"
+
+    def test_collapses_whitespace(self):
+        assert _sanitize_string("hello    world") == "hello world"
+
+    def test_truncates_long_strings(self):
+        long = "a" * 6000
+        assert len(_sanitize_string(long)) == 5000
+
+    def test_handles_none(self):
+        assert _sanitize_string(None) == ""
+
+    def test_handles_empty(self):
+        assert _sanitize_string("") == ""
 
 
 class TestValidateInput:
@@ -32,7 +53,7 @@ class TestValidateInput:
 
     def test_attendees_out_of_range(self):
         state = {
-            "request_id": "test",
+            "request_id": "form-test1",
             "requester_name": "Test",
             "requester_email": "test@test.com",
             "event_name": "Test Event",
@@ -47,7 +68,7 @@ class TestValidateInput:
 
     def test_unknown_room_type(self):
         state = {
-            "request_id": "test",
+            "request_id": "form-test2",
             "requester_name": "Test",
             "requester_email": "test@test.com",
             "event_name": "Test Event",
@@ -59,6 +80,36 @@ class TestValidateInput:
         }
         result = validate_input(state)
         assert any("Unknown room" in e for e in result["errors"])
+
+    def test_rejects_injection_in_request_id(self):
+        state = {
+            "request_id": "'; DROP TABLE--",
+            "requester_name": "Test",
+            "requester_email": "test@test.com",
+            "event_name": "Test Event",
+            "requested_date": "2026-04-15",
+            "requested_start_time": "09:00",
+            "requested_end_time": "12:00",
+            "errors": [],
+        }
+        result = validate_input(state)
+        assert any("request_id format" in e for e in result["errors"])
+
+    def test_sanitizes_string_fields(self):
+        state = {
+            "request_id": "form-test3",
+            "requester_name": "Jane\x00Doe",
+            "requester_email": "test@test.com",
+            "event_name": "Event\x07Name",
+            "requested_date": "2026-04-15",
+            "requested_start_time": "09:00",
+            "requested_end_time": "12:00",
+            "errors": [],
+        }
+        result = validate_input(state)
+        assert result["errors"] == []
+        assert result["requester_name"] == "JaneDoe"
+        assert result["event_name"] == "EventName"
 
 
 class TestEdgeRouting:
@@ -128,6 +179,17 @@ class TestEvaluateEligibility:
         result = evaluate_eligibility(sample_request)
         assert result["decision"] == "needs_review"
 
+    @patch("app.graph.nodes.llm")
+    def test_retries_on_transient_failure(self, mock_llm, sample_request):
+        """Verify that transient LLM failures result in needs_review, not a crash."""
+        mock_llm.invoke.side_effect = ConnectionError("API unreachable")
+
+        from app.graph.nodes import evaluate_eligibility
+
+        result = evaluate_eligibility(sample_request)
+        assert result["decision"] == "needs_review"
+        assert any("failed" in e.lower() for e in result.get("errors", []))
+
 
 class TestDeterminePricing:
     @patch("app.graph.nodes.llm")
@@ -150,7 +212,7 @@ class TestDeterminePricing:
         mock_llm.invoke.return_value = mock_response
 
         state = {
-            "request_id": "test",
+            "request_id": "form-test4",
             "requester_name": "Test",
             "requester_email": "test@nonprofit.org",
             "event_name": "Community Workshop",

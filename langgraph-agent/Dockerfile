@@ -9,7 +9,11 @@ RUN apt-get update && \
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
+# Run as non-root user
+RUN groupadd -r cgcs && useradd -r -g cgcs -d /app -s /sbin/nologin cgcs
 COPY app/ ./app/
+RUN chown -R cgcs:cgcs /app
+USER cgcs
 
 EXPOSE 8000
 

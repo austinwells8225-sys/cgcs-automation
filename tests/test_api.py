@@ -2,12 +2,15 @@
 
 from unittest.mock import AsyncMock, patch
 
-import pytest
 from fastapi.testclient import TestClient
 
+from app.config import settings
 from app.main import app
 
 client = TestClient(app)
+
+WEBHOOK_HEADERS = {"X-Webhook-Secret": settings.webhook_secret} if settings.webhook_secret else {}
+AUTH_HEADERS = {"Authorization": f"Bearer {settings.langgraph_api_key}"} if settings.langgraph_api_key else {}
 
 
 class TestHealthEndpoint:
@@ -16,6 +19,52 @@ class TestHealthEndpoint:
         assert response.status_code == 200
         data = response.json()
         assert data["status"] == "healthy"
+
+
+class TestAuthSecurity:
+    @patch("app.main.compiled_graph")
+    @patch("app.main.create_reservation", new_callable=AsyncMock)
+    @patch("app.main.add_audit_entry", new_callable=AsyncMock)
+    def test_evaluate_rejects_without_webhook_secret(
+        self, mock_audit, mock_create, mock_graph
+    ):
+        if not settings.webhook_secret:
+            return  # Skip if no secret configured
+        response = client.post(
+            "/api/v1/evaluate",
+            json={
+                "request_id": "form-test123",
+                "requester_name": "Jane Doe",
+                "requester_email": "jane@txgov.gov",
+                "event_name": "Staff Meeting",
+                "requested_date": "2026-04-15",
+                "requested_start_time": "09:00",
+                "requested_end_time": "12:00",
+                "calendar_available": True,
+            },
+        )
+        assert response.status_code == 401
+
+    def test_approve_rejects_without_api_key(self):
+        if not settings.langgraph_api_key:
+            return
+        response = client.post(
+            "/api/v1/approve/form-test123",
+            json={"action": "approve"},
+        )
+        assert response.status_code == 401
+
+    def test_reservation_rejects_without_api_key(self):
+        if not settings.langgraph_api_key:
+            return
+        response = client.get("/api/v1/reservation/form-test123")
+        assert response.status_code == 401
+
+    def test_dead_letter_rejects_without_api_key(self):
+        if not settings.langgraph_api_key:
+            return
+        response = client.get("/api/v1/dead-letter")
+        assert response.status_code == 401
 
 
 class TestEvaluateEndpoint:
@@ -40,6 +89,7 @@ class TestEvaluateEndpoint:
 
         response = client.post(
             "/api/v1/evaluate",
+            headers=WEBHOOK_HEADERS,
             json={
                 "request_id": "form-test123",
                 "requester_name": "Jane Doe",
@@ -64,9 +114,55 @@ class TestEvaluateEndpoint:
     def test_evaluate_rejects_missing_fields(self):
         response = client.post(
             "/api/v1/evaluate",
+            headers=WEBHOOK_HEADERS,
             json={"request_id": "test"},
         )
         assert response.status_code == 422
+
+    def test_evaluate_rejects_invalid_request_id(self):
+        response = client.post(
+            "/api/v1/evaluate",
+            headers=WEBHOOK_HEADERS,
+            json={
+                "request_id": "'; DROP TABLE reservations;--",
+                "requester_name": "Jane Doe",
+                "requester_email": "jane@txgov.gov",
+                "event_name": "Staff Meeting",
+                "requested_date": "2026-04-15",
+                "requested_start_time": "09:00",
+                "requested_end_time": "12:00",
+                "calendar_available": True,
+            },
+        )
+        assert response.status_code == 422
+
+    @patch("app.main.compiled_graph")
+    @patch("app.main.add_dead_letter", new_callable=AsyncMock)
+    def test_evaluate_dead_letters_on_graph_failure(
+        self, mock_dlq, mock_graph
+    ):
+        mock_graph.invoke.side_effect = RuntimeError("LLM service unavailable")
+        mock_dlq.return_value = 1
+
+        response = client.post(
+            "/api/v1/evaluate",
+            headers=WEBHOOK_HEADERS,
+            json={
+                "request_id": "form-fail123",
+                "requester_name": "Jane Doe",
+                "requester_email": "jane@txgov.gov",
+                "event_name": "Staff Meeting",
+                "requested_date": "2026-04-15",
+                "requested_start_time": "09:00",
+                "requested_end_time": "12:00",
+                "calendar_available": True,
+            },
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["decision"] == "needs_review"
+        mock_dlq.assert_called_once()
 
 
 class TestApproveEndpoint:
@@ -91,6 +187,7 @@ class TestApproveEndpoint:
 
         response = client.post(
             "/api/v1/approve/form-test123",
+            headers=AUTH_HEADERS,
             json={"action": "approve", "admin_notes": "Looks good"},
         )
 
@@ -104,6 +201,7 @@ class TestApproveEndpoint:
 
         response = client.post(
             "/api/v1/approve/nonexistent",
+            headers=AUTH_HEADERS,
             json={"action": "approve"},
         )
 
@@ -119,11 +217,20 @@ class TestApproveEndpoint:
 
         response = client.post(
             "/api/v1/approve/form-test123",
+            headers=AUTH_HEADERS,
             json={"action": "approve"},
         )
 
         assert response.status_code == 400
         assert "already" in response.json()["detail"].lower()
+
+    def test_approve_rejects_invalid_action(self):
+        response = client.post(
+            "/api/v1/approve/form-test123",
+            headers=AUTH_HEADERS,
+            json={"action": "maybe"},
+        )
+        assert response.status_code == 422
 
 
 class TestReservationLookup:
@@ -136,7 +243,10 @@ class TestReservationLookup:
             "requester_name": "Jane Doe",
         }
 
-        response = client.get("/api/v1/reservation/form-test123")
+        response = client.get(
+            "/api/v1/reservation/form-test123",
+            headers=AUTH_HEADERS,
+        )
         assert response.status_code == 200
         assert response.json()["request_id"] == "form-test123"
 
@@ -144,5 +254,35 @@ class TestReservationLookup:
     def test_get_nonexistent_reservation(self, mock_get):
         mock_get.return_value = None
 
-        response = client.get("/api/v1/reservation/nonexistent")
+        response = client.get(
+            "/api/v1/reservation/nonexistent",
+            headers=AUTH_HEADERS,
+        )
         assert response.status_code == 404
+
+
+class TestDeadLetterQueue:
+    @patch("app.main.get_dead_letter_entries", new_callable=AsyncMock)
+    def test_list_dead_letters(self, mock_dlq):
+        mock_dlq.return_value = [
+            {"id": 1, "request_id": "form-fail", "error_message": "timeout", "status": "pending"}
+        ]
+
+        response = client.get(
+            "/api/v1/dead-letter",
+            headers=AUTH_HEADERS,
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["count"] == 1
+
+    @patch("app.main.resolve_dead_letter", new_callable=AsyncMock)
+    def test_resolve_dead_letter(self, mock_resolve):
+        mock_resolve.return_value = True
+
+        response = client.post(
+            "/api/v1/dead-letter/1/resolve",
+            headers=AUTH_HEADERS,
+        )
+        assert response.status_code == 200
+        assert response.json()["status"] == "resolved"

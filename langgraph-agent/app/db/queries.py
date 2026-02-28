@@ -1,8 +1,6 @@
-from datetime import datetime
+import json
 from typing import Any
 from uuid import UUID
-
-import asyncpg
 
 from app.db.connection import get_pool
 
@@ -116,8 +114,6 @@ async def add_audit_entry(
 ) -> None:
     """Insert an audit trail entry."""
     pool = await get_pool()
-    import json
-
     await pool.execute(
         """
         INSERT INTO cgcs.audit_trail (reservation_id, action, actor, details)
@@ -128,3 +124,70 @@ async def add_audit_entry(
         actor,
         json.dumps(details) if details else None,
     )
+
+
+async def add_dead_letter(
+    request_id: str | None,
+    payload: dict,
+    error_message: str,
+    error_type: str,
+) -> int:
+    """Insert a failed request into the dead letter queue. Returns the DLQ entry ID."""
+    pool = await get_pool()
+    row = await pool.fetchrow(
+        """
+        INSERT INTO cgcs.dead_letter_queue (request_id, payload, error_message, error_type)
+        VALUES ($1, $2::jsonb, $3, $4)
+        RETURNING id
+        """,
+        request_id,
+        json.dumps(payload),
+        error_message,
+        error_type,
+    )
+    return row["id"]
+
+
+async def increment_dead_letter_failure(request_id: str) -> int:
+    """Increment failure count for an existing DLQ entry. Returns new count."""
+    pool = await get_pool()
+    row = await pool.fetchrow(
+        """
+        UPDATE cgcs.dead_letter_queue
+        SET failure_count = failure_count + 1,
+            error_message = error_message
+        WHERE request_id = $1 AND status = 'pending'
+        RETURNING failure_count
+        """,
+        request_id,
+    )
+    return row["failure_count"] if row else 0
+
+
+async def get_dead_letter_entries(status: str = "pending") -> list[dict]:
+    """Fetch dead letter queue entries by status."""
+    pool = await get_pool()
+    rows = await pool.fetch(
+        """
+        SELECT * FROM cgcs.dead_letter_queue
+        WHERE status = $1
+        ORDER BY created_at DESC
+        """,
+        status,
+    )
+    return [dict(r) for r in rows]
+
+
+async def resolve_dead_letter(dlq_id: int, resolved_by: str = "admin") -> bool:
+    """Mark a dead letter entry as resolved."""
+    pool = await get_pool()
+    result = await pool.execute(
+        """
+        UPDATE cgcs.dead_letter_queue
+        SET status = 'resolved', resolved_at = NOW(), resolved_by = $2
+        WHERE id = $1 AND status = 'pending'
+        """,
+        dlq_id,
+        resolved_by,
+    )
+    return result == "UPDATE 1"

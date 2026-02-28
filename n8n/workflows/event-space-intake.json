@@ -81,14 +81,21 @@
       "parameters": {
         "method": "POST",
         "url": "http://langgraph-agent:8000/api/v1/evaluate",
-        "authentication": "genericCredentialType",
-        "genericAuthType": "httpHeaderAuth",
         "sendBody": true,
         "bodyParameters": {
           "parameters": []
         },
         "specifyBody": "json",
         "jsonBody": "={{ JSON.stringify($json) }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-Webhook-Secret",
+              "value": "={{ $env.WEBHOOK_SECRET }}"
+            }
+          ]
+        },
         "options": {
           "timeout": 60000
         }
@@ -97,13 +104,7 @@
       "name": "Call LangGraph Agent",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [1340, 200],
-      "credentials": {
-        "httpHeaderAuth": {
-          "id": "CONFIGURE_IN_N8N",
-          "name": "LangGraph Agent API Key"
-        }
-      }
+      "position": [1340, 200]
     },
     {
       "parameters": {
