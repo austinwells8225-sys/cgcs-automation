@@ -64,6 +64,21 @@ services:
       - LLM_TIMEOUT=${LLM_TIMEOUT:-60}
       - LLM_MAX_RETRIES=${LLM_MAX_RETRIES:-3}
       - DEAD_LETTER_MAX_FAILURES=${DEAD_LETTER_MAX_FAILURES:-3}
+      # LangSmith
+      - LANGCHAIN_API_KEY=${LANGCHAIN_API_KEY:-}
+      - LANGCHAIN_PROJECT=${LANGCHAIN_PROJECT:-cgcs-automation}
+      - LANGCHAIN_TRACING_V2=${LANGCHAIN_TRACING_V2:-true}
+      # Google APIs
+      - GOOGLE_SERVICE_ACCOUNT_FILE=${GOOGLE_SERVICE_ACCOUNT_FILE:-}
+      - GOOGLE_CALENDAR_ID=${GOOGLE_CALENDAR_ID:-primary}
+      - PET_TRACKER_SPREADSHEET_ID=${PET_TRACKER_SPREADSHEET_ID:-}
+      # Zoho Mail
+      - ZOHO_MAIL_TOKEN=${ZOHO_MAIL_TOKEN:-}
+      - ZOHO_ACCOUNT_ID=${ZOHO_ACCOUNT_ID:-}
+      # Email
+      - EMAIL_AUTO_SEND_ALLOWLIST=${EMAIL_AUTO_SEND_ALLOWLIST:-}
+    volumes:
+      - ./credentials:/app/credentials:ro
     depends_on:
       postgres:
         condition: service_healthy
@@ -87,6 +102,7 @@ services:
       - ./db/init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
       - ./db/migrations/001_initial_schema.sql:/docker-entrypoint-initdb.d/02-schema.sql:ro
       - ./db/migrations/002_seed_data.sql:/docker-entrypoint-initdb.d/03-seed.sql:ro
+      - ./db/migrations/003_multi_capability.sql:/docker-entrypoint-initdb.d/04-multi-capability.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
       interval: 10s

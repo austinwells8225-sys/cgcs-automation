@@ -286,3 +286,201 @@ class TestDeadLetterQueue:
         )
         assert response.status_code == 200
         assert response.json()["status"] == "resolved"
+
+
+# ============================================================
+# New endpoint tests
+# ============================================================
+
+class TestEmailTriageEndpoint:
+    @patch("app.main.compiled_graph")
+    def test_email_triage_returns_classification(self, mock_graph):
+        mock_graph.invoke.return_value = {
+            "email_priority": "medium",
+            "email_category": "event_request",
+            "email_draft_reply": "Thank you for your inquiry...",
+            "email_auto_send": False,
+            "decision": "needs_review",
+            "errors": [],
+        }
+
+        response = client.post(
+            "/api/v1/email/triage",
+            headers=WEBHOOK_HEADERS,
+            json={
+                "email_from": "test@example.com",
+                "email_subject": "Event space inquiry",
+                "email_body": "I would like to reserve a room for a meeting.",
+            },
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["email_category"] == "event_request"
+        assert data["email_auto_send"] is False
+
+    @patch("app.main.compiled_graph")
+    def test_email_triage_auto_send_for_allowlisted(self, mock_graph):
+        mock_graph.invoke.return_value = {
+            "email_priority": "medium",
+            "email_category": "question",
+            "email_draft_reply": "Hello! Here is the info...",
+            "email_auto_send": True,
+            "decision": "approve",
+            "errors": [],
+        }
+
+        response = client.post(
+            "/api/v1/email/triage",
+            headers=WEBHOOK_HEADERS,
+            json={
+                "email_from": "stefano.casafrancalaos@austincc.edu",
+                "email_subject": "Quick question",
+                "email_body": "What are your hours?",
+            },
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["email_auto_send"] is True
+
+
+class TestCalendarEndpoints:
+    @patch("app.main.compiled_graph")
+    def test_calendar_check(self, mock_graph):
+        mock_graph.invoke.return_value = {
+            "calendar_is_available": True,
+            "calendar_events": [],
+            "decision": "approve",
+            "errors": [],
+        }
+
+        response = client.post(
+            "/api/v1/calendar/check",
+            headers=WEBHOOK_HEADERS,
+            json={
+                "date": "2026-04-15",
+                "start_time": "09:00",
+                "end_time": "12:00",
+            },
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["is_available"] is True
+
+    @patch("app.main.compiled_graph")
+    def test_calendar_hold(self, mock_graph):
+        mock_graph.invoke.return_value = {
+            "hold_event_id": "google-event-123",
+            "decision": "approve",
+            "draft_response": "Calendar hold created: HOLD - Test Org - 2026-04-15",
+            "errors": [],
+        }
+
+        response = client.post(
+            "/api/v1/calendar/hold",
+            headers=AUTH_HEADERS,
+            json={
+                "org_name": "Test Org",
+                "date": "2026-04-15",
+                "start_time": "09:00",
+                "end_time": "12:00",
+            },
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["hold_event_id"] == "google-event-123"
+
+
+class TestPetTrackerEndpoints:
+    @patch("app.main.compiled_graph")
+    def test_pet_query(self, mock_graph):
+        mock_graph.invoke.return_value = {
+            "pet_result": {"headers": ["Name", "Status"], "rows": [["Event A", "Active"]]},
+            "decision": "approve",
+            "errors": [],
+        }
+
+        response = client.post(
+            "/api/v1/pet/query",
+            headers=AUTH_HEADERS,
+            json={"query": "Event A"},
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["result"]["rows"][0][0] == "Event A"
+
+    @patch("app.main.compiled_graph")
+    def test_pet_update_staging(self, mock_graph):
+        mock_graph.invoke.return_value = {
+            "pet_result": {"staged_id": "abc12345", "status": "staged"},
+            "requires_approval": True,
+            "decision": "needs_review",
+            "errors": [],
+        }
+
+        response = client.post(
+            "/api/v1/pet/update",
+            headers=AUTH_HEADERS,
+            json={"row_data": {"Name": "Event A", "Status": "Complete"}},
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["staged_id"] == "abc12345"
+        assert data["requires_approval"] is True
+
+
+class TestLeadEndpoints:
+    @patch("app.main.compiled_graph")
+    def test_assign_lead(self, mock_graph):
+        mock_graph.invoke.return_value = {
+            "lead_staff_name": "John Smith",
+            "lead_staff_email": "john@austincc.edu",
+            "lead_reservation_id": "form-test123",
+            "reminders_due": [
+                {"reminder_type": "30_day", "remind_date": "2026-03-16"},
+                {"reminder_type": "14_day", "remind_date": "2026-04-01"},
+            ],
+            "decision": "approve",
+            "draft_response": "Event lead assigned",
+            "errors": [],
+        }
+
+        response = client.post(
+            "/api/v1/leads/assign",
+            headers=AUTH_HEADERS,
+            json={
+                "staff_name": "John Smith",
+                "staff_email": "john@austincc.edu",
+                "reservation_id": "form-test123",
+                "event_date": "2026-04-15",
+            },
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["staff_name"] == "John Smith"
+        assert data["reminders_scheduled"] == 2
+
+
+class TestReminderEndpoints:
+    @patch("app.main.compiled_graph")
+    def test_check_reminders(self, mock_graph):
+        mock_graph.invoke.return_value = {
+            "decision": "approve",
+            "draft_response": "No reminders due at this time.",
+            "errors": [],
+        }
+
+        response = client.post(
+            "/api/v1/reminders/check",
+            headers=WEBHOOK_HEADERS,
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["decision"] == "approve"

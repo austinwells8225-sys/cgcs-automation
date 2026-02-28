@@ -1,0 +1,267 @@
+{
+  "name": "CGCS Email Monitoring & Triage",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 5
+            }
+          ]
+        }
+      },
+      "id": "cron-trigger",
+      "name": "Every 5 Minutes",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "=https://mail.zoho.com/api/accounts/{{ $env.ZOHO_ACCOUNT_ID }}/messages/view",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "folderId",
+              "value": "inbox"
+            },
+            {
+              "name": "status",
+              "value": "unread"
+            },
+            {
+              "name": "limit",
+              "value": "10"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Zoho-oauthtoken {{ $env.ZOHO_MAIL_TOKEN }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "fetch-emails",
+      "name": "Fetch Unread Emails",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Transform Zoho email data into triage request format\nconst emails = $input.all();\nconst results = [];\n\nfor (const item of emails) {\n  const data = item.json.data || [];\n  for (const msg of data) {\n    results.push({\n      json: {\n        email_id: msg.messageId,\n        email_from: msg.fromAddress || '',\n        email_subject: msg.subject || '',\n        email_body: msg.content || msg.summary || ''\n      }\n    });\n  }\n}\n\nif (results.length === 0) {\n  return [{ json: { _skip: true } }];\n}\n\nreturn results;"
+      },
+      "id": "transform-emails",
+      "name": "Transform Email Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [680, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json._skip }}",
+              "value2": true,
+              "operation": "notEqual"
+            }
+          ]
+        }
+      },
+      "id": "if-has-emails",
+      "name": "IF Has Emails",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [900, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://langgraph-agent:8000/api/v1/email/triage",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-Webhook-Secret",
+              "value": "={{ $env.WEBHOOK_SECRET }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "id": "call-triage",
+      "name": "Call Email Triage Agent",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1120, 200]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.email_auto_send }}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "id": "if-auto-send",
+      "name": "IF Auto-Send Approved",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1340, 200]
+    },
+    {
+      "parameters": {
+        "fromEmail": "events@cgcs.austincc.edu",
+        "toEmail": "={{ $('Call Email Triage Agent').first().json.email_from }}",
+        "subject": "=Re: {{ $('Transform Email Data').first().json.email_subject }}",
+        "emailType": "html",
+        "html": "=<div style=\"font-family: Arial, sans-serif;\">{{ $json.email_draft_reply.replace(/\\n/g, '<br>') }}</div>",
+        "options": {}
+      },
+      "id": "auto-send-reply",
+      "name": "Auto-Send Reply",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [1560, 100],
+      "credentials": {
+        "smtp": {
+          "id": "CONFIGURE_IN_N8N",
+          "name": "Zoho SMTP"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "fromEmail": "events@cgcs.austincc.edu",
+        "toEmail": "={{ $env.ADMIN_EMAIL }}",
+        "subject": "=Email Triage: {{ $json.email_category }} ({{ $json.email_priority }}) - Review Required",
+        "emailType": "html",
+        "html": "=<h2>Email Triage - Review Required</h2>\n<ul>\n  <li><strong>From:</strong> {{ $('Transform Email Data').first().json.email_from }}</li>\n  <li><strong>Subject:</strong> {{ $('Transform Email Data').first().json.email_subject }}</li>\n  <li><strong>Category:</strong> {{ $json.email_category }}</li>\n  <li><strong>Priority:</strong> {{ $json.email_priority }}</li>\n</ul>\n<h3>AI Draft Reply</h3>\n<blockquote style=\"background:#f9f9f9; padding:15px; border-left:4px solid #ccc;\">\n  <pre>{{ $json.email_draft_reply }}</pre>\n</blockquote>\n<p>\n  <a href=\"{{ $env.WEBHOOK_URL }}/webhook/email/approve?email_id={{ $json.request_id }}&action=approve\" style=\"background:#28a745; color:white; padding:10px 20px; text-decoration:none; border-radius:5px; margin-right:10px;\">Approve & Send</a>\n  <a href=\"{{ $env.WEBHOOK_URL }}/webhook/email/approve?email_id={{ $json.request_id }}&action=reject\" style=\"background:#dc3545; color:white; padding:10px 20px; text-decoration:none; border-radius:5px;\">Reject</a>\n</p>",
+        "options": {}
+      },
+      "id": "notify-admin-email",
+      "name": "Notify Admin for Review",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [1560, 320],
+      "credentials": {
+        "smtp": {
+          "id": "CONFIGURE_IN_N8N",
+          "name": "Zoho SMTP"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Every 5 Minutes": {
+      "main": [
+        [
+          {
+            "node": "Fetch Unread Emails",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Unread Emails": {
+      "main": [
+        [
+          {
+            "node": "Transform Email Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Transform Email Data": {
+      "main": [
+        [
+          {
+            "node": "IF Has Emails",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF Has Emails": {
+      "main": [
+        [
+          {
+            "node": "Call Email Triage Agent",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "Call Email Triage Agent": {
+      "main": [
+        [
+          {
+            "node": "IF Auto-Send Approved",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF Auto-Send Approved": {
+      "main": [
+        [
+          {
+            "node": "Auto-Send Reply",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Notify Admin for Review",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [
+    {
+      "name": "CGCS",
+      "id": "1"
+    },
+    {
+      "name": "Email",
+      "id": "4"
+    }
+  ],
+  "triggerCount": 1,
+  "pinData": {}
+}

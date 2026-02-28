@@ -2,8 +2,9 @@
 
 from unittest.mock import MagicMock, patch
 
-from app.graph.edges import after_eligibility, after_validation
+from app.graph.edges import after_eligibility, after_routing, after_validation
 from app.graph.nodes import _sanitize_string, handle_error, validate_input
+from app.graph.nodes.router import route_task
 
 
 class TestSanitizeString:
@@ -112,6 +113,28 @@ class TestValidateInput:
         assert result["event_name"] == "EventName"
 
 
+class TestRouteTask:
+    def test_routes_event_intake(self):
+        result = route_task({"task_type": "event_intake", "errors": []})
+        assert result["task_type"] == "event_intake"
+
+    def test_routes_email_triage(self):
+        result = route_task({"task_type": "email_triage", "errors": []})
+        assert result["task_type"] == "email_triage"
+
+    def test_routes_calendar_check(self):
+        result = route_task({"task_type": "calendar_check", "errors": []})
+        assert result["task_type"] == "calendar_check"
+
+    def test_defaults_to_event_intake(self):
+        result = route_task({"errors": []})
+        assert result["task_type"] == "event_intake"
+
+    def test_unknown_task_type(self):
+        result = route_task({"task_type": "unknown_type", "errors": []})
+        assert any("Unknown task_type" in e for e in result.get("errors", []))
+
+
 class TestEdgeRouting:
     def test_after_validation_with_errors(self):
         state = {"errors": ["some error"]}
@@ -133,6 +156,26 @@ class TestEdgeRouting:
         state = {"decision": "needs_review"}
         assert after_eligibility(state) == "handle_error"
 
+    def test_after_routing_event_intake(self):
+        state = {"task_type": "event_intake", "errors": []}
+        assert after_routing(state) == "validate_input"
+
+    def test_after_routing_email(self):
+        state = {"task_type": "email_triage", "errors": []}
+        assert after_routing(state) == "classify_email"
+
+    def test_after_routing_calendar(self):
+        state = {"task_type": "calendar_check", "errors": []}
+        assert after_routing(state) == "check_calendar_availability"
+
+    def test_after_routing_with_errors(self):
+        state = {"task_type": "event_intake", "errors": ["error"]}
+        assert after_routing(state) == "handle_error"
+
+    def test_after_routing_unknown_type(self):
+        state = {"task_type": "unknown", "errors": []}
+        assert after_routing(state) == "handle_error"
+
 
 class TestHandleError:
     def test_generates_review_response(self, sample_request):
@@ -145,7 +188,7 @@ class TestHandleError:
 
 
 class TestEvaluateEligibility:
-    @patch("app.graph.nodes.llm")
+    @patch("app.graph.nodes.shared.llm")
     def test_eligible_government_agency(self, mock_llm, sample_request):
         mock_response = MagicMock()
         mock_response.content = '{"is_eligible": true, "reason": "Government agency", "tier_suggestion": "government_agency"}'
@@ -157,7 +200,7 @@ class TestEvaluateEligibility:
         assert result["is_eligible"] is True
         assert result["pricing_tier"] == "government_agency"
 
-    @patch("app.graph.nodes.llm")
+    @patch("app.graph.nodes.shared.llm")
     def test_ineligible_commercial(self, mock_llm, ineligible_request):
         mock_response = MagicMock()
         mock_response.content = '{"is_eligible": false, "reason": "Purely commercial event", "tier_suggestion": "external"}'
@@ -168,7 +211,7 @@ class TestEvaluateEligibility:
         result = evaluate_eligibility(ineligible_request)
         assert result["is_eligible"] is False
 
-    @patch("app.graph.nodes.llm")
+    @patch("app.graph.nodes.shared.llm")
     def test_handles_malformed_response(self, mock_llm, sample_request):
         mock_response = MagicMock()
         mock_response.content = "This is not JSON"
@@ -179,7 +222,7 @@ class TestEvaluateEligibility:
         result = evaluate_eligibility(sample_request)
         assert result["decision"] == "needs_review"
 
-    @patch("app.graph.nodes.llm")
+    @patch("app.graph.nodes.shared.llm")
     def test_retries_on_transient_failure(self, mock_llm, sample_request):
         """Verify that transient LLM failures result in needs_review, not a crash."""
         mock_llm.invoke.side_effect = ConnectionError("API unreachable")
@@ -192,7 +235,7 @@ class TestEvaluateEligibility:
 
 
 class TestDeterminePricing:
-    @patch("app.graph.nodes.llm")
+    @patch("app.graph.nodes.shared.llm")
     def test_government_pricing(self, mock_llm, sample_request):
         mock_response = MagicMock()
         mock_response.content = '{"pricing_tier": "government_agency", "justification": "State agency"}'
@@ -205,7 +248,7 @@ class TestDeterminePricing:
         assert result["pricing_tier"] == "government_agency"
         assert result["estimated_cost"] == 0.0
 
-    @patch("app.graph.nodes.llm")
+    @patch("app.graph.nodes.shared.llm")
     def test_nonprofit_pricing(self, mock_llm):
         mock_response = MagicMock()
         mock_response.content = '{"pricing_tier": "nonprofit", "justification": "501c3 org"}'

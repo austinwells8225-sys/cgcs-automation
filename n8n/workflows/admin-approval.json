@@ -18,7 +18,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// Extract and validate approval parameters\nconst query = $input.first().json.query || {};\nconst request_id = query.request_id;\nconst action = query.action; // 'approve' or 'reject'\nconst admin_notes = query.notes || null;\nconst edited_response = query.edited_response || null;\n\nif (!request_id) {\n  throw new Error('Missing request_id parameter');\n}\n\nif (!['approve', 'reject'].includes(action)) {\n  throw new Error('Invalid action. Must be approve or reject');\n}\n\nreturn [{\n  json: {\n    request_id,\n    action,\n    admin_notes,\n    edited_response\n  }\n}];"
+        "jsCode": "// Extract and validate approval parameters with multi-type routing\nconst query = $input.first().json.query || {};\nconst request_id = query.request_id || query.email_id;\nconst action = query.action; // 'approve' or 'reject'\nconst admin_notes = query.notes || null;\nconst edited_response = query.edited_response || null;\nconst task_type = query.task_type || (request_id && request_id.startsWith('email-') ? 'email' : 'reservation');\n\nif (!request_id) {\n  throw new Error('Missing request_id parameter');\n}\n\nif (!['approve', 'reject'].includes(action)) {\n  throw new Error('Invalid action. Must be approve or reject');\n}\n\nreturn [{\n  json: {\n    request_id,\n    action,\n    admin_notes,\n    edited_response,\n    task_type\n  }\n}];"
       },
       "id": "parse-approval",
       "name": "Parse Approval Action",

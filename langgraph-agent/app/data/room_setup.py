@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 ROOM_CONFIGS: dict[str, dict] = {
     "large_conference": {
         "display_name": "Large Conference Room",

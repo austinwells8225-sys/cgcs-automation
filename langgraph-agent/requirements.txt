@@ -9,3 +9,7 @@ pydantic-settings>=2.7,<3
 email-validator>=2.0,<3
 httpx>=0.28,<0.29
 python-dotenv>=1.0,<2
+# LangSmith tracing
+langsmith>=0.2,<1
+# Google APIs (calendar, sheets)
+google-auth>=2.0,<3

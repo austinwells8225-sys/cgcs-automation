@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 PRICING_TIERS: dict[str, dict] = {
     "acc_internal": {"hourly_rate": 0.00, "minimum_hours": 1},
     "government_agency": {"hourly_rate": 0.00, "minimum_hours": 1},

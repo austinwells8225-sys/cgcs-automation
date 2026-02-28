@@ -6,6 +6,10 @@ from uuid import UUID
 from pydantic import BaseModel, EmailStr, Field
 
 
+# ============================================================
+# Event Intake (existing)
+# ============================================================
+
 class EvaluateRequest(BaseModel):
     request_id: str = Field(max_length=64, pattern=r"^[a-zA-Z0-9_-]+$")
     requester_name: str = Field(max_length=255)
@@ -71,3 +75,120 @@ class ReservationDetail(BaseModel):
 class HealthResponse(BaseModel):
     status: str
     environment: str
+
+
+# ============================================================
+# Email Triage
+# ============================================================
+
+class EmailTriageRequest(BaseModel):
+    request_id: Optional[str] = Field(None, max_length=64)
+    email_id: Optional[str] = Field(None, max_length=255)
+    email_from: str = Field(max_length=255)
+    email_subject: Optional[str] = Field(None, max_length=1000)
+    email_body: str = Field(max_length=50000)
+
+
+class EmailTriageResponse(BaseModel):
+    request_id: str
+    email_priority: Optional[str] = None
+    email_category: Optional[str] = None
+    email_draft_reply: Optional[str] = None
+    email_auto_send: bool = False
+    decision: str = "needs_review"
+    errors: list[str] = []
+
+
+class EmailApproveRequest(BaseModel):
+    action: str = Field(pattern=r"^(approve|reject)$")
+    edited_reply: Optional[str] = Field(None, max_length=50000)
+
+
+# ============================================================
+# Calendar
+# ============================================================
+
+class CalendarCheckRequest(BaseModel):
+    date: str = Field(pattern=r"^\d{4}-\d{2}-\d{2}$")
+    start_time: str = Field(pattern=r"^\d{2}:\d{2}$")
+    end_time: str = Field(pattern=r"^\d{2}:\d{2}$")
+
+
+class CalendarCheckResponse(BaseModel):
+    request_id: str
+    is_available: Optional[bool] = None
+    events: list[dict] = []
+    errors: list[str] = []
+
+
+class CalendarHoldRequest(BaseModel):
+    org_name: str = Field(max_length=255)
+    date: str = Field(pattern=r"^\d{4}-\d{2}-\d{2}$")
+    start_time: str = Field(pattern=r"^\d{2}:\d{2}$")
+    end_time: str = Field(pattern=r"^\d{2}:\d{2}$")
+
+
+class CalendarHoldResponse(BaseModel):
+    request_id: str
+    hold_event_id: Optional[str] = None
+    decision: str = "needs_review"
+    draft_response: Optional[str] = None
+    errors: list[str] = []
+
+
+# ============================================================
+# P.E.T. Tracker
+# ============================================================
+
+class PetQueryRequest(BaseModel):
+    query: str = Field(default="", max_length=500)
+
+
+class PetQueryResponse(BaseModel):
+    request_id: str
+    result: Optional[dict] = None
+    errors: list[str] = []
+
+
+class PetUpdateRequest(BaseModel):
+    row_data: dict
+
+
+class PetUpdateResponse(BaseModel):
+    request_id: str
+    staged_id: Optional[str] = None
+    requires_approval: bool = True
+    errors: list[str] = []
+
+
+# ============================================================
+# Event Leads
+# ============================================================
+
+class EventLeadRequest(BaseModel):
+    staff_name: str = Field(max_length=255)
+    staff_email: EmailStr
+    reservation_id: str = Field(max_length=64)
+    event_date: str = Field(pattern=r"^\d{4}-\d{2}-\d{2}$")
+
+
+class EventLeadResponse(BaseModel):
+    request_id: str
+    staff_name: Optional[str] = None
+    staff_email: Optional[str] = None
+    reservation_id: Optional[str] = None
+    reminders_scheduled: int = 0
+    decision: str = "needs_review"
+    draft_response: Optional[str] = None
+    errors: list[str] = []
+
+
+# ============================================================
+# Generic task response
+# ============================================================
+
+class GenericTaskResponse(BaseModel):
+    request_id: str
+    decision: str = "needs_review"
+    draft_response: Optional[str] = None
+    errors: list[str] = []

@@ -1,15 +1,20 @@
+"""Event intake nodes — moved verbatim from the original nodes.py."""
+
+from __future__ import annotations
+
 import json
 import logging
 import re
-import time
 from datetime import datetime
 
-from langchain_anthropic import ChatAnthropic
-
-from app.config import settings
 from app.data.pricing import PRICING_TIERS, compute_cost
 from app.data.room_setup import ROOM_CONFIGS, find_suitable_room
-from app.graph.state import ReservationState
+from app.graph.nodes.shared import (
+    _invoke_with_retry,
+    _parse_json_response,
+    _sanitize_string,
+)
+from app.graph.state import AgentState
 from app.prompts.templates import (
     APPROVAL_RESPONSE_SYSTEM_PROMPT,
     ELIGIBILITY_SYSTEM_PROMPT,
@@ -20,56 +25,8 @@ from app.prompts.templates import (
 
 logger = logging.getLogger(__name__)
 
-llm = ChatAnthropic(
-    model=settings.claude_model,
-    api_key=settings.anthropic_api_key,
-    max_tokens=1024,
-    timeout=settings.llm_timeout,
-)
 
-
-def _parse_json_response(text: str) -> dict:
-    """Extract and parse JSON from LLM response, handling markdown code blocks."""
-    match = re.search(r"```(?:json)?\s*([\s\S]*?)```", text)
-    if match:
-        text = match.group(1)
-    return json.loads(text.strip())
-
-
-def _invoke_with_retry(messages: list[dict]) -> str:
-    """Invoke LLM with exponential backoff retry on transient failures."""
-    last_error = None
-    for attempt in range(settings.llm_max_retries):
-        try:
-            response = llm.invoke(messages)
-            return response.content
-        except Exception as e:
-            last_error = e
-            if attempt < settings.llm_max_retries - 1:
-                delay = settings.llm_retry_base_delay * (2 ** attempt)
-                logger.warning(
-                    "LLM call failed (attempt %d/%d), retrying in %.1fs: %s",
-                    attempt + 1, settings.llm_max_retries, delay, e,
-                )
-                time.sleep(delay)
-            else:
-                logger.error("LLM call failed after %d attempts: %s", settings.llm_max_retries, e)
-    raise last_error
-
-
-def _sanitize_string(value: str | None) -> str:
-    """Strip control characters and excessive whitespace from input strings."""
-    if not value:
-        return ""
-    # Remove control characters except newlines and tabs
-    cleaned = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]", "", value)
-    # Collapse excessive whitespace
-    cleaned = re.sub(r"[ \t]+", " ", cleaned)
-    # Limit length to prevent abuse
-    return cleaned[:5000].strip()
-
-
-def validate_input(state: ReservationState) -> dict:
+def validate_input(state: AgentState) -> dict:
     """Validate and sanitize all required fields. Pure Python, no LLM call."""
     errors: list[str] = []
 
@@ -130,7 +87,7 @@ def validate_input(state: ReservationState) -> dict:
     return {**sanitized, "errors": errors}
 
 
-def evaluate_eligibility(state: ReservationState) -> dict:
+def evaluate_eligibility(state: AgentState) -> dict:
     """Use Claude to evaluate whether the request meets CGCS eligibility criteria."""
     user_message = (
         f"Organization: {_sanitize_string(state.get('requester_organization', 'Not specified'))}\n"
@@ -168,7 +125,7 @@ def evaluate_eligibility(state: ReservationState) -> dict:
         }
 
 
-def determine_pricing(state: ReservationState) -> dict:
+def determine_pricing(state: AgentState) -> dict:
     """Use Claude to classify pricing tier and compute cost."""
     user_message = (
         f"Organization: {_sanitize_string(state.get('requester_organization', 'Not specified'))}\n"
@@ -209,7 +166,7 @@ def determine_pricing(state: ReservationState) -> dict:
         }
 
 
-def evaluate_room_setup(state: ReservationState) -> dict:
+def evaluate_room_setup(state: AgentState) -> dict:
     """Use Claude to parse setup requirements and validate room suitability."""
     room_key = state.get("room_requested") or "multipurpose"
     room = ROOM_CONFIGS.get(room_key, ROOM_CONFIGS["multipurpose"])
@@ -256,7 +213,7 @@ def evaluate_room_setup(state: ReservationState) -> dict:
         return {"room_assignment": room_key, "setup_config": {}}
 
 
-def draft_approval_response(state: ReservationState) -> dict:
+def draft_approval_response(state: AgentState) -> dict:
     """Use Claude to draft an approval email."""
     room_key = state.get("room_assignment", "multipurpose")
     room_name = ROOM_CONFIGS.get(room_key, {}).get("display_name", room_key)
@@ -289,7 +246,7 @@ def draft_approval_response(state: ReservationState) -> dict:
         }
 
 
-def draft_rejection(state: ReservationState) -> dict:
+def draft_rejection(state: AgentState) -> dict:
     """Use Claude to draft a rejection email."""
     prompt = REJECTION_RESPONSE_SYSTEM_PROMPT.format(
         requester_name=_sanitize_string(state.get("requester_name", "")),
@@ -313,7 +270,7 @@ def draft_rejection(state: ReservationState) -> dict:
         }
 
 
-def handle_error(state: ReservationState) -> dict:
+def handle_error(state: AgentState) -> dict:
     """Generate a fallback response for manual review."""
     errors = state.get("errors", [])
     return {

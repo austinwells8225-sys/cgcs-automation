@@ -1,0 +1,121 @@
+{
+  "name": "CGCS Calendar Hold Request",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "calendar/hold",
+        "authentication": "headerAuth",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "hold-webhook",
+      "name": "Webhook - Hold Request",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [240, 300],
+      "webhookId": "calendar-hold"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Validate and extract hold request parameters\nconst input = $input.first().json.body || $input.first().json;\n\nconst org_name = (input.org_name || '').trim();\nconst date = (input.date || '').trim();\nconst start_time = (input.start_time || '').trim();\nconst end_time = (input.end_time || '').trim();\n\nif (!org_name || !date || !start_time || !end_time) {\n  throw new Error('Missing required fields: org_name, date, start_time, end_time');\n}\n\nreturn [{\n  json: { org_name, date, start_time, end_time }\n}];"
+      },
+      "id": "validate-hold",
+      "name": "Validate Hold Request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://langgraph-agent:8000/api/v1/calendar/hold",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.LANGGRAPH_API_KEY }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "id": "create-hold",
+      "name": "Create Calendar Hold",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [680, 300]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ status: 'success', hold_event_id: $json.hold_event_id, message: $json.draft_response }) }}",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "id": "respond-hold",
+      "name": "Respond with Result",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [900, 300]
+    }
+  ],
+  "connections": {
+    "Webhook - Hold Request": {
+      "main": [
+        [
+          {
+            "node": "Validate Hold Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate Hold Request": {
+      "main": [
+        [
+          {
+            "node": "Create Calendar Hold",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Calendar Hold": {
+      "main": [
+        [
+          {
+            "node": "Respond with Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [
+    {
+      "name": "CGCS",
+      "id": "1"
+    },
+    {
+      "name": "Calendar",
+      "id": "6"
+    }
+  ],
+  "triggerCount": 1,
+  "pinData": {}
+}
