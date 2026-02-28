@@ -1,0 +1,219 @@
+{
+  "name": "CGCS Admin Approval - Human in the Loop",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "GET",
+        "path": "intake/approve",
+        "authentication": "headerAuth",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "approval-webhook",
+      "name": "Webhook - Admin Approval",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [240, 300],
+      "webhookId": "intake-approve"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Extract and validate approval parameters\nconst query = $input.first().json.query || {};\nconst request_id = query.request_id;\nconst action = query.action; // 'approve' or 'reject'\nconst admin_notes = query.notes || null;\nconst edited_response = query.edited_response || null;\n\nif (!request_id) {\n  throw new Error('Missing request_id parameter');\n}\n\nif (!['approve', 'reject'].includes(action)) {\n  throw new Error('Invalid action. Must be approve or reject');\n}\n\nreturn [{\n  json: {\n    request_id,\n    action,\n    admin_notes,\n    edited_response\n  }\n}];"
+      },
+      "id": "parse-approval",
+      "name": "Parse Approval Action",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=http://langgraph-agent:8000/api/v1/approve/{{ $json.request_id }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ action: $json.action, admin_notes: $json.admin_notes, edited_response: $json.edited_response }) }}",
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "id": "update-reservation",
+      "name": "Update Reservation Status",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [680, 300],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "CONFIGURE_IN_N8N",
+          "name": "LangGraph Agent API Key"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $json.status }}",
+              "value2": "approved"
+            }
+          ]
+        }
+      },
+      "id": "if-approved",
+      "name": "IF Approved",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [900, 300]
+    },
+    {
+      "parameters": {
+        "fromEmail": "events@cgcs.austincc.edu",
+        "toEmail": "={{ $json.requester_email }}",
+        "subject": "=CGCS Event Space Request - {{ $json.event_name }}",
+        "emailType": "html",
+        "html": "=<div style=\"font-family: Arial, sans-serif; max-width: 600px;\">\n{{ $json.draft_response.replace(/\\n/g, '<br>') }}\n</div>",
+        "options": {}
+      },
+      "id": "send-approval-email",
+      "name": "Send Approval to Requester",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [1120, 200],
+      "credentials": {
+        "smtp": {
+          "id": "CONFIGURE_IN_N8N",
+          "name": "Zoho SMTP"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "fromEmail": "events@cgcs.austincc.edu",
+        "toEmail": "={{ $json.requester_email }}",
+        "subject": "=CGCS Event Space Request - {{ $json.event_name }}",
+        "emailType": "html",
+        "html": "=<div style=\"font-family: Arial, sans-serif; max-width: 600px;\">\n<p>Dear {{ $json.requester_name }},</p>\n<p>Thank you for your interest in the Center for Government & Civic Service event spaces at Austin Community College.</p>\n<p>After careful review, we are unable to accommodate your request for <strong>{{ $json.event_name }}</strong> at this time.</p>\n<p>We encourage you to explore alternative options or contact us to discuss other possibilities.</p>\n<p>Best regards,<br>CGCS Event Space Team<br>Austin Community College</p>\n</div>",
+        "options": {}
+      },
+      "id": "send-rejection-email",
+      "name": "Send Rejection to Requester",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [1120, 420],
+      "credentials": {
+        "smtp": {
+          "id": "CONFIGURE_IN_N8N",
+          "name": "Zoho SMTP"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "=✅ Request {{ $('Parse Approval Action').first().json.request_id }} has been {{ $('Parse Approval Action').first().json.action }}d. Email sent to the requester.",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "id": "respond-success",
+      "name": "Respond to Admin",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [1340, 300]
+    }
+  ],
+  "connections": {
+    "Webhook - Admin Approval": {
+      "main": [
+        [
+          {
+            "node": "Parse Approval Action",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Approval Action": {
+      "main": [
+        [
+          {
+            "node": "Update Reservation Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Reservation Status": {
+      "main": [
+        [
+          {
+            "node": "IF Approved",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF Approved": {
+      "main": [
+        [
+          {
+            "node": "Send Approval to Requester",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Send Rejection to Requester",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Approval to Requester": {
+      "main": [
+        [
+          {
+            "node": "Respond to Admin",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Rejection to Requester": {
+      "main": [
+        [
+          {
+            "node": "Respond to Admin",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [
+    {
+      "name": "CGCS",
+      "id": "1"
+    },
+    {
+      "name": "Approval",
+      "id": "3"
+    }
+  ],
+  "triggerCount": 1,
+  "pinData": {}
+}

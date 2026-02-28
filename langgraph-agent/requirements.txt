@@ -1,0 +1,10 @@
+fastapi>=0.115,<0.116
+uvicorn[standard]>=0.34,<0.35
+langgraph>=0.3,<0.4
+langchain-anthropic>=0.3,<0.4
+psycopg[binary]>=3.2,<4
+asyncpg>=0.30,<0.31
+pydantic>=2.10,<3
+pydantic-settings>=2.7,<3
+httpx>=0.28,<0.29
+python-dotenv>=1.0,<2
