@@ -7,6 +7,13 @@ import logging
 import re
 from datetime import datetime
 
+from app.cgcs_constants import (
+    AMI_FACILITY_PRICING,
+    DEADLINES,
+    DEPOSIT_RATE,
+    EVENT_PREFIXES,
+    HOURS,
+)
 from app.data.pricing import PRICING_TIERS, compute_cost
 from app.data.room_setup import ROOM_CONFIGS, find_suitable_room
 from app.graph.nodes.shared import (
@@ -145,6 +152,12 @@ def determine_pricing(state: AgentState) -> dict:
             tier = "external"
 
         cost = compute_cost(tier, state["requested_start_time"], state["requested_end_time"])
+
+        # For A-EVENT (AMI/paid), calculate deposit
+        event_type = state.get("event_type", "")
+        deposit = 0.0
+        if event_type == "A-EVENT" and cost > 0:
+            deposit = round(cost * DEPOSIT_RATE, 2)
 
         return {
             "pricing_tier": tier,

@@ -3,7 +3,7 @@ from typing import Optional, TypedDict
 
 class AgentState(TypedDict, total=False):
     # --- Common fields ---
-    task_type: str  # event_intake | email_triage | calendar_check | calendar_hold | pet_tracker | event_lead | reminder_check
+    task_type: str  # event_intake | email_triage | calendar_check | calendar_hold | pet_tracker | event_lead | reminder_check | daily_digest
     request_id: str
     errors: list[str]
     decision: Optional[str]  # 'approve', 'reject', 'needs_review'
@@ -54,6 +54,7 @@ class AgentState(TypedDict, total=False):
     hold_start_time: Optional[str]
     hold_end_time: Optional[str]
     hold_event_id: Optional[str]
+    hold_event_type: Optional[str]  # HOLD, S-EVENT, C-EVENT, A-EVENT
 
     # --- P.E.T. tracker fields ---
     pet_operation: Optional[str]  # 'read' or 'update'
@@ -66,10 +67,21 @@ class AgentState(TypedDict, total=False):
     lead_staff_email: Optional[str]
     lead_reservation_id: Optional[str]
     lead_event_date: Optional[str]
+    lead_current_month_count: Optional[int]  # current month lead count for cap enforcement
 
     # --- Reminder fields ---
     reminders_due: Optional[list[dict]]
     reminders_sent: Optional[list[dict]]
+
+    # --- Daily digest fields ---
+    digest_pending_approvals: Optional[list[dict]]
+    digest_new_intakes: Optional[list[dict]]
+    digest_upcoming_events: Optional[list[dict]]
+    digest_pending_agreements: Optional[list[dict]]
+    digest_overdue_deadlines: Optional[list[dict]]
+
+    # --- Event type ---
+    event_type: Optional[str]  # S-EVENT, C-EVENT, A-EVENT
 
 
 # Backward compatibility alias

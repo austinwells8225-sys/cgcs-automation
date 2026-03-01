@@ -1,28 +1,33 @@
 """Unit tests for event lead and reminder nodes."""
 
+from app.cgcs_constants import REMINDER_INTERVALS, STAFF_ROSTER
 from app.graph.nodes.event_lead import (
-    REMINDER_INTERVALS,
     assign_event_lead,
     schedule_reminders,
 )
 from app.graph.nodes.reminders import find_due_reminders, send_reminders
 
+# Use a real staff member from the roster for tests
+_TEST_STAFF = STAFF_ROSTER[0]
+_TEST_STAFF_NAME = _TEST_STAFF["name"]
+_TEST_STAFF_EMAIL = _TEST_STAFF["email"]
+
 
 class TestAssignEventLead:
     def test_valid_assignment(self):
         state = {
-            "lead_staff_name": "John Smith",
-            "lead_staff_email": "john@austincc.edu",
+            "lead_staff_name": _TEST_STAFF_NAME,
+            "lead_staff_email": _TEST_STAFF_EMAIL,
             "lead_reservation_id": "form-test123",
             "errors": [],
         }
         result = assign_event_lead(state)
         assert result["decision"] == "approve"
-        assert result["lead_staff_name"] == "John Smith"
+        assert result["lead_staff_name"] == _TEST_STAFF_NAME
 
     def test_missing_staff_name(self):
         state = {
-            "lead_staff_email": "john@austincc.edu",
+            "lead_staff_email": _TEST_STAFF_EMAIL,
             "lead_reservation_id": "form-test123",
             "errors": [],
         }
@@ -36,20 +41,44 @@ class TestAssignEventLead:
 
     def test_sanitizes_staff_name(self):
         state = {
-            "lead_staff_name": "John\x00Smith",
-            "lead_staff_email": "john@austincc.edu",
+            "lead_staff_name": _TEST_STAFF_NAME[:3] + "\x00" + _TEST_STAFF_NAME[3:],
+            "lead_staff_email": _TEST_STAFF_EMAIL,
             "lead_reservation_id": "form-test123",
             "errors": [],
         }
         result = assign_event_lead(state)
-        assert result["lead_staff_name"] == "JohnSmith"
+        assert "\x00" not in result.get("lead_staff_name", "")
+        assert result["decision"] == "approve"
+
+    def test_rejects_non_roster_staff(self):
+        state = {
+            "lead_staff_name": "Unknown Person",
+            "lead_staff_email": "nobody@example.com",
+            "lead_reservation_id": "form-test123",
+            "errors": [],
+        }
+        result = assign_event_lead(state)
+        assert result["decision"] == "needs_review"
+        assert any("not in the CGCS staff roster" in e for e in result.get("errors", []))
+
+    def test_monthly_cap_enforcement(self):
+        state = {
+            "lead_staff_name": _TEST_STAFF_NAME,
+            "lead_staff_email": _TEST_STAFF_EMAIL,
+            "lead_reservation_id": "form-test123",
+            "lead_current_month_count": 3,
+            "errors": [],
+        }
+        result = assign_event_lead(state)
+        assert result["decision"] == "needs_review"
+        assert any("monthly lead cap" in e for e in result.get("errors", []))
 
 
 class TestScheduleReminders:
     def test_schedules_reminders_for_future_event(self):
         state = {
             "lead_event_date": "2027-06-15",
-            "lead_staff_email": "john@austincc.edu",
+            "lead_staff_email": _TEST_STAFF_EMAIL,
             "lead_reservation_id": "form-test123",
             "errors": [],
         }
@@ -59,7 +88,7 @@ class TestScheduleReminders:
 
     def test_no_reminders_for_missing_date(self):
         state = {
-            "lead_staff_email": "john@austincc.edu",
+            "lead_staff_email": _TEST_STAFF_EMAIL,
             "errors": [],
         }
         result = schedule_reminders(state)
@@ -68,7 +97,7 @@ class TestScheduleReminders:
     def test_invalid_date_format(self):
         state = {
             "lead_event_date": "not-a-date",
-            "lead_staff_email": "john@austincc.edu",
+            "lead_staff_email": _TEST_STAFF_EMAIL,
             "errors": [],
         }
         result = schedule_reminders(state)
@@ -116,7 +145,7 @@ class TestSendReminders:
                 {
                     "reminder_type": "30_day",
                     "reservation_id": "form-test123",
-                    "staff_email": "john@austincc.edu",
+                    "staff_email": _TEST_STAFF_EMAIL,
                     "status": "pending",
                 }
             ],

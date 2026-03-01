@@ -672,3 +672,64 @@ async def check_reminders(
         draft_response=result.get("draft_response"),
         errors=result.get("errors", []),
     )
+
+
+# ============================================================
+# Daily Digest endpoint — NEW
+# ============================================================
+
+@app.post("/api/v1/daily-digest", response_model=GenericTaskResponse)
+async def daily_digest(
+    _auth: str = Security(verify_webhook_secret),
+):
+    """Generate and send the daily digest email to admin (called by cron)."""
+    request_id = f"digest-{uuid.uuid4().hex[:12]}"
+    logger.info("Generating daily digest")
+
+    initial_state = {
+        "task_type": "daily_digest",
+        "request_id": request_id,
+        "digest_pending_approvals": [],  # populated from DB in production
+        "digest_new_intakes": [],
+        "digest_upcoming_events": [],
+        "digest_pending_agreements": [],
+        "digest_overdue_deadlines": [],
+        "reminders_due": [],
+        "errors": [],
+    }
+
+    try:
+        result = compiled_graph.invoke(
+            initial_state,
+            config=_run_config("daily_digest", request_id),
+        )
+    except Exception as e:
+        logger.exception("Daily digest generation failed")
+        return GenericTaskResponse(
+            request_id=request_id,
+            decision="needs_review",
+            errors=[f"Daily digest failed: {e}"],
+        )
+
+    return GenericTaskResponse(
+        request_id=request_id,
+        decision=result.get("decision", "approve"),
+        draft_response=result.get("draft_response"),
+        errors=result.get("errors", []),
+    )
+
+
+# ============================================================
+# Staff Roster endpoint — NEW
+# ============================================================
+
+@app.get("/api/v1/staff-roster")
+async def staff_roster(
+    _auth: str = Security(verify_api_key),
+):
+    """Return the current CGCS staff roster from cgcs_constants."""
+    from app.cgcs_constants import STAFF_ROSTER, MAX_LEADS_PER_STAFF_PER_MONTH
+    return {
+        "staff": STAFF_ROSTER,
+        "max_leads_per_month": MAX_LEADS_PER_STAFF_PER_MONTH,
+    }

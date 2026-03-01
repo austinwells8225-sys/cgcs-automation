@@ -18,6 +18,7 @@ def after_routing(state: AgentState) -> str:
         "pet_tracker": "read_pet_tracker",
         "event_lead": "assign_event_lead",
         "reminder_check": "find_due_reminders",
+        "daily_digest": "build_daily_digest",
     }
 
     return routes.get(task_type, "handle_error")

@@ -108,7 +108,7 @@ def check_availability(date: str, start_time: str, end_time: str) -> dict:
         raise
 
 
-def create_hold(title: str, date: str, start_time: str, end_time: str) -> dict:
+def create_hold(title: str, date: str, start_time: str, end_time: str, description: str | None = None) -> dict:
     """Create a hold event on the CGCS Events calendar.
 
     Args:
@@ -116,6 +116,7 @@ def create_hold(title: str, date: str, start_time: str, end_time: str) -> dict:
         date: ISO date string
         start_time: HH:MM
         end_time: HH:MM
+        description: Optional event description (calendar entry template)
 
     Returns:
         {"event_id": str, "html_link": str}
@@ -129,7 +130,7 @@ def create_hold(title: str, date: str, start_time: str, end_time: str) -> dict:
             "summary": title,
             "start": {"dateTime": f"{date}T{start_time}:00-06:00", "timeZone": "America/Chicago"},
             "end": {"dateTime": f"{date}T{end_time}:00-06:00", "timeZone": "America/Chicago"},
-            "description": "Calendar hold created by CGCS Automation Engine",
+            "description": description or "Calendar hold created by CGCS Automation Engine",
             "colorId": "5",  # Banana yellow for holds
         }
 

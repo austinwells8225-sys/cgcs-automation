@@ -1,5 +1,5 @@
 {
-  "name": "CGCS Reminder Check (Daily 8am CT)",
+  "name": "CGCS Daily Cron (Reminders + Digest, 8am CT)",
   "nodes": [
     {
       "parameters": {
@@ -43,13 +43,46 @@
     },
     {
       "parameters": {
+        "method": "POST",
+        "url": "http://langgraph-agent:8000/api/v1/daily-digest",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-Webhook-Secret",
+              "value": "={{ $env.WEBHOOK_SECRET }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 120000
+        }
+      },
+      "id": "generate-digest",
+      "name": "Generate Daily Digest",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [460, 500]
+    },
+    {
+      "parameters": {
         "jsCode": "// Log reminder check results\nconst result = $input.first().json;\nconsole.log(`Reminder check: ${result.draft_response || 'No response'}`);\n\nreturn [{ json: result }];"
       },
-      "id": "log-results",
-      "name": "Log Results",
+      "id": "log-reminders",
+      "name": "Log Reminder Results",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [680, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Log digest results and prepare email\nconst result = $input.first().json;\nconst digestBody = result.draft_response || 'No digest generated';\nconsole.log(`Daily digest generated: ${digestBody.substring(0, 100)}...`);\n\nreturn [{ json: { ...result, send_to: 'austin.wells@austincc.edu' } }];"
+      },
+      "id": "log-digest",
+      "name": "Log Digest Results",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [680, 500]
     }
   ],
   "connections": {
@@ -60,6 +93,11 @@
             "node": "Check Due Reminders",
             "type": "main",
             "index": 0
+          },
+          {
+            "node": "Generate Daily Digest",
+            "type": "main",
+            "index": 0
           }
         ]
       ]
@@ -68,7 +106,18 @@
       "main": [
         [
           {
-            "node": "Log Results",
+            "node": "Log Reminder Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Daily Digest": {
+      "main": [
+        [
+          {
+            "node": "Log Digest Results",
             "type": "main",
             "index": 0
           }
@@ -89,6 +138,10 @@
     {
       "name": "Reminders",
       "id": "5"
+    },
+    {
+      "name": "Digest",
+      "id": "6"
     }
   ],
   "triggerCount": 1,

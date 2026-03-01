@@ -14,6 +14,7 @@ VALID_TASK_TYPES = {
     "pet_tracker",
     "event_lead",
     "reminder_check",
+    "daily_digest",
 }
 
 

@@ -11,6 +11,7 @@ from app.graph.edges import (
 )
 from app.graph.nodes import (
     assign_event_lead,
+    build_daily_digest,
     check_auto_send,
     check_calendar_availability,
     classify_email,
@@ -73,6 +74,9 @@ def build_graph() -> StateGraph:
     graph.add_node("find_due_reminders", find_due_reminders)
     graph.add_node("send_reminders", send_reminders)
 
+    # --- Daily digest node ---
+    graph.add_node("build_daily_digest", build_daily_digest)
+
     # --- Shared error handler ---
     graph.add_node("handle_error", handle_error)
 
@@ -115,6 +119,9 @@ def build_graph() -> StateGraph:
     # --- Reminder edges ---
     graph.add_edge("find_due_reminders", "send_reminders")
     graph.add_edge("send_reminders", END)
+
+    # --- Daily digest edges ---
+    graph.add_edge("build_daily_digest", END)
 
     # --- Error handler ---
     graph.add_edge("handle_error", END)

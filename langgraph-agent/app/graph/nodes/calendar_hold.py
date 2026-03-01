@@ -6,6 +6,7 @@ import logging
 import re
 from datetime import datetime
 
+from app.cgcs_constants import build_calendar_description, build_calendar_title
 from app.graph.nodes.shared import _sanitize_string
 from app.graph.state import AgentState
 from app.services.google_calendar import create_hold
@@ -63,8 +64,14 @@ def create_calendar_hold(state: AgentState) -> dict:
     hold_date = state["hold_date"]
     start_time = state["hold_start_time"]
     end_time = state["hold_end_time"]
+    event_type = state.get("hold_event_type", "HOLD")
 
-    title = f"HOLD - {org_name} - {hold_date}"
+    title = build_calendar_title(event_type, org_name)
+    description = build_calendar_description(
+        event_name=org_name,
+        status="HOLD",
+        date_time=f"{hold_date} {start_time}-{end_time}",
+    )
 
     try:
         result = create_hold(
@@ -72,6 +79,7 @@ def create_calendar_hold(state: AgentState) -> dict:
             date=hold_date,
             start_time=start_time,
             end_time=end_time,
+            description=description,
         )
         return {
             "hold_event_id": result["event_id"],

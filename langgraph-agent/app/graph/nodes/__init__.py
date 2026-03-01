@@ -38,6 +38,7 @@ from app.graph.nodes.reminders import (
     find_due_reminders,
     send_reminders,
 )
+from app.graph.nodes.daily_digest import build_daily_digest
 
 __all__ = [
     # Shared
@@ -73,4 +74,6 @@ __all__ = [
     # Reminders
     "find_due_reminders",
     "send_reminders",
+    # Daily digest
+    "build_daily_digest",
 ]
