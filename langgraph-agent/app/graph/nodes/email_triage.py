@@ -130,9 +130,15 @@ def draft_email_reply(state: AgentState) -> dict:
         f"Draft a professional reply on behalf of CGCS at Austin Community College."
     )
 
+    # Inject rejection lessons if available (passed via state from endpoint)
+    system_prompt = EMAIL_TRIAGE_SYSTEM_PROMPT
+    lessons = state.get("email_rejection_lessons", "")
+    if lessons:
+        system_prompt = system_prompt + "\n\n" + lessons
+
     try:
         content = _invoke_with_retry([
-            {"role": "system", "content": EMAIL_TRIAGE_SYSTEM_PROMPT},
+            {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_message},
         ])
         return {

@@ -1,10 +1,14 @@
+import csv
+import io
 import json
 import logging
 import traceback
 import uuid
 from contextlib import asynccontextmanager
+from datetime import date
 
 from fastapi import FastAPI, Header, HTTPException, Request, Security
+from fastapi.responses import StreamingResponse
 from fastapi.security import APIKeyHeader
 
 from app.config import settings
@@ -20,7 +24,43 @@ from app.db.queries import (
     resolve_dead_letter,
 )
 from app.graph.builder import build_graph
+from app.cgcs_constants import build_acknowledgment_email, build_checklist_for_event
+from app.db.checklist_queries import (
+    bulk_update_checklist_items,
+    get_checklist,
+    get_compliance_report,
+    insert_checklist_items,
+    update_checklist_item,
+)
+from app.db.quote_queries import (
+    create_quote_version,
+    get_latest_quote,
+    get_quote_history,
+)
+from app.db.rejection_queries import (
+    create_rejection_pattern,
+    get_rejection_insights,
+    get_rejection_patterns,
+    select_revision,
+)
+from app.db.report_queries import (
+    complete_reservation,
+    get_conversion_funnel,
+    get_reservations_for_export,
+    get_revenue_report,
+    get_top_organizations,
+)
+from app.graph.nodes.shared import _invoke_with_retry, _parse_json_response
+from app.prompt_tuning import get_rejection_lessons
+from app.prompts.templates import REJECTION_REWORK_SYSTEM_PROMPT
+from app.services.process_insights import (
+    build_quarterly_report,
+    get_monthly_quick_stats,
+)
+from app.services.quote_builder import build_initial_quote, format_quote_for_email, update_quote
 from app.models import (
+    AcknowledgeRequest,
+    AcknowledgeResponse,
     ApproveRequest,
     CalendarCheckRequest,
     CalendarCheckResponse,
@@ -39,6 +79,33 @@ from app.models import (
     PetQueryResponse,
     PetUpdateRequest,
     PetUpdateResponse,
+    CompleteReservationRequest,
+    CompleteReservationResponse,
+    ConversionFunnelResponse,
+    RevenueReportResponse,
+    TopOrganizationsResponse,
+    BulkChecklistUpdateRequest,
+    BulkChecklistUpdateResponse,
+    ChecklistItemResponse,
+    ChecklistItemUpdateRequest,
+    ChecklistResponse,
+    ComplianceReportResponse,
+    EmailRejectAndReworkRequest,
+    EmailRejectAndReworkResponse,
+    RejectionInsightsResponse,
+    RevisionOption,
+    SelectRevisionRequest,
+    SelectRevisionResponse,
+    AddServiceItem,
+    QuoteGenerateResponse,
+    QuoteHistoryResponse,
+    QuoteLineItem,
+    QuoteUpdateRequest,
+    QuoteUpdateResponse,
+    QuoteVersionResponse,
+    ProcessInsightsResponse,
+    QuarterlyReportRequest,
+    QuarterlyReportResponse,
 )
 
 logging.basicConfig(level=settings.log_level)
@@ -98,6 +165,30 @@ app = FastAPI(
 @app.get("/api/v1/health", response_model=HealthResponse)
 async def health():
     return HealthResponse(status="healthy", environment=settings.environment)
+
+
+# ============================================================
+# Step 1A — Acknowledgment Email (webhook secret auth, no approval gate)
+# ============================================================
+
+@app.post("/api/v1/acknowledge", response_model=AcknowledgeResponse)
+async def acknowledge(
+    request: AcknowledgeRequest,
+    _auth: str = Security(verify_webhook_secret),
+):
+    """Send automatic acknowledgment email — continueOnFail, never blocks pipeline."""
+    try:
+        email = build_acknowledgment_email(request.requester_name)
+    except Exception:
+        logger.exception("Acknowledgment email build failed, using fallback")
+        email = build_acknowledgment_email("")
+
+    return AcknowledgeResponse(
+        to=request.requester_email,
+        subject=email["subject"],
+        body=email["body"],
+        auto_send=True,
+    )
 
 
 # ============================================================
@@ -188,6 +279,16 @@ async def evaluate(
             },
         )
         logger.info("Reservation %s saved with status pending_review", request.request_id)
+
+        # Auto-generate initial quote on approve (continueOnFail)
+        if result.get("decision") == "approve" and result.get("pricing_tier"):
+            try:
+                quote_data = build_initial_quote({**reservation_data, **result})
+                await create_quote_version(reservation_id, quote_data)
+                logger.info("Auto-generated quote v1 for %s", request.request_id)
+            except Exception:
+                logger.exception("Auto-quote generation failed for %s (continueOnFail)", request.request_id)
+
     except Exception as e:
         logger.exception("Failed to save reservation to database")
         # Dead letter the result so it's not lost
@@ -271,6 +372,22 @@ async def approve(
 
     logger.info("Reservation %s %sd by admin", request_id, body.action)
 
+    # Generate compliance checklist on approval (continueOnFail)
+    if body.action == "approve":
+        try:
+            checklist_items = build_checklist_for_event(updated)
+            if checklist_items:
+                await insert_checklist_items(updated["id"], checklist_items)
+                await add_audit_entry(
+                    reservation_id=updated["id"],
+                    action="checklist_generated",
+                    actor="system",
+                    details={"item_count": len(checklist_items)},
+                )
+                logger.info("Generated %d checklist items for %s", len(checklist_items), request_id)
+        except Exception:
+            logger.exception("Checklist generation failed for %s (continueOnFail)", request_id)
+
     return {
         "request_id": request_id,
         "status": updated["status"],
@@ -332,6 +449,13 @@ async def triage_email(
     request_id = request.request_id or f"email-{uuid.uuid4().hex[:12]}"
     logger.info("Triaging email: %s from %s", request_id, request.email_from)
 
+    # Fetch rejection lessons to inject into email drafting (continueOnFail)
+    lessons = ""
+    try:
+        lessons = await get_rejection_lessons()
+    except Exception:
+        logger.debug("Failed to fetch rejection lessons (continueOnFail)")
+
     initial_state = {
         "task_type": "email_triage",
         "request_id": request_id,
@@ -339,6 +463,7 @@ async def triage_email(
         "email_from": request.email_from,
         "email_subject": request.email_subject,
         "email_body": request.email_body,
+        "email_rejection_lessons": lessons,
         "errors": [],
     }
 
@@ -382,9 +507,48 @@ async def approve_email(
     body: EmailApproveRequest,
     _auth: str = Security(verify_api_key),
 ):
-    """Admin approves or rejects an email draft reply."""
-    # In production, this looks up from cgcs.email_tasks and sends via Zoho
+    """Admin approves or rejects an email draft reply.
+
+    When rejecting with a rejection_reason, automatically triggers the
+    rework flow: generates 3 improved versions and stores the pattern.
+    """
     logger.info("Email %s %sd by admin", email_id, body.action)
+
+    if body.action == "reject" and body.rejection_reason:
+        # Trigger rework flow inline
+        try:
+            prompt = REJECTION_REWORK_SYSTEM_PROMPT.format(
+                email_from="unknown",
+                email_subject="unknown",
+                category="unknown",
+                original_draft=body.edited_reply or "No original draft available",
+                rejection_reason=body.rejection_reason,
+            )
+            content = _invoke_with_retry([
+                {"role": "system", "content": prompt},
+                {"role": "user", "content": "Generate 3 revised versions."},
+            ])
+            parsed = _parse_json_response(content)
+            revisions = parsed.get("revisions", [])
+
+            pattern_id = await create_rejection_pattern(
+                email_task_id=None,
+                original_draft=body.edited_reply or "",
+                rejection_reason=body.rejection_reason,
+                revision_options=revisions,
+                category=None,
+            )
+
+            return {
+                "email_id": email_id,
+                "action": "rejected",
+                "status": "rework_generated",
+                "pattern_id": pattern_id,
+                "revisions": revisions,
+            }
+        except Exception:
+            logger.exception("Rework generation failed for email %s (returning simple reject)", email_id)
+
     return {
         "email_id": email_id,
         "action": body.action,
@@ -399,6 +563,115 @@ async def list_pending_emails(
     """List pending email drafts awaiting admin approval."""
     # In production, queries cgcs.email_tasks WHERE status = 'pending_review'
     return {"count": 0, "entries": []}
+
+
+# ============================================================
+# Email Rejection / Self-Improving Drafts — NEW
+# ============================================================
+
+@app.post("/api/v1/email/reject-and-rework/{email_id}", response_model=EmailRejectAndReworkResponse)
+async def reject_and_rework(
+    email_id: str,
+    body: EmailRejectAndReworkRequest,
+    _auth: str = Security(verify_api_key),
+):
+    """Reject an email draft and generate 3 improved revisions."""
+    logger.info("Reject-and-rework for email %s: %s", email_id, body.rejection_reason[:80])
+
+    prompt = REJECTION_REWORK_SYSTEM_PROMPT.format(
+        email_from=body.email_from or "unknown",
+        email_subject=body.email_subject or "unknown",
+        category=body.category or "unknown",
+        original_draft=body.original_draft or "No original draft provided",
+        rejection_reason=body.rejection_reason,
+    )
+
+    try:
+        content = _invoke_with_retry([
+            {"role": "system", "content": prompt},
+            {"role": "user", "content": "Generate 3 revised versions."},
+        ])
+        parsed = _parse_json_response(content)
+        revisions = parsed.get("revisions", [])
+    except Exception as e:
+        logger.exception("Rework LLM call failed for email %s", email_id)
+        raise HTTPException(status_code=502, detail=f"Revision generation failed: {e}")
+
+    pattern_id = await create_rejection_pattern(
+        email_task_id=None,
+        original_draft=body.original_draft or "",
+        rejection_reason=body.rejection_reason,
+        revision_options=revisions,
+        category=body.category,
+    )
+
+    return EmailRejectAndReworkResponse(
+        email_id=email_id,
+        pattern_id=pattern_id,
+        revisions=[RevisionOption(**r) for r in revisions],
+    )
+
+
+@app.post("/api/v1/email/select-revision/{pattern_id}", response_model=SelectRevisionResponse)
+async def select_revision_endpoint(
+    pattern_id: int,
+    body: SelectRevisionRequest,
+    _auth: str = Security(verify_api_key),
+):
+    """Admin selects one of the 3 revisions or provides a custom final draft."""
+    if body.revision_index is None and not body.final_draft:
+        raise HTTPException(
+            status_code=422,
+            detail="Must provide either revision_index (0-2) or final_draft",
+        )
+
+    # If selecting a revision by index, retrieve the draft from stored options
+    final_draft = body.final_draft
+    if body.revision_index is not None and not final_draft:
+        patterns = await get_rejection_patterns(limit=1)
+        # Look up this specific pattern
+        for p in patterns:
+            if p["id"] == pattern_id:
+                options = p.get("revision_options", [])
+                if body.revision_index < len(options):
+                    final_draft = options[body.revision_index].get("draft", "")
+                break
+        if not final_draft:
+            # Fallback: query by pattern_id directly
+            all_patterns = await get_rejection_patterns(limit=100)
+            for p in all_patterns:
+                if p["id"] == pattern_id:
+                    options = p.get("revision_options", [])
+                    if body.revision_index < len(options):
+                        final_draft = options[body.revision_index].get("draft", "")
+                    break
+
+    if not final_draft:
+        raise HTTPException(status_code=404, detail="Pattern or revision not found")
+
+    updated = await select_revision(
+        pattern_id=pattern_id,
+        revision_index=body.revision_index,
+        final_draft=final_draft,
+    )
+    if not updated:
+        raise HTTPException(status_code=404, detail="Rejection pattern not found")
+
+    return SelectRevisionResponse(
+        pattern_id=pattern_id,
+        status="revision_selected",
+        final_draft=final_draft,
+    )
+
+
+@app.get("/api/v1/email/rejection-insights", response_model=RejectionInsightsResponse)
+async def rejection_insights(
+    category: str = "",
+    _auth: str = Security(verify_api_key),
+):
+    """Aggregated rejection analytics: top reasons, improvement rate, category breakdown."""
+    result = await get_rejection_insights(category=category or None)
+    return RejectionInsightsResponse(**result)
 
 
 # ============================================================
@@ -686,6 +959,14 @@ async def daily_digest(
     request_id = f"digest-{uuid.uuid4().hex[:12]}"
     logger.info("Generating daily digest")
 
+    # Fetch monthly quick stats (continueOnFail)
+    monthly_stats = {}
+    try:
+        today = date.today()
+        monthly_stats = await get_monthly_quick_stats(today.replace(day=1))
+    except Exception:
+        logger.exception("Monthly quick stats failed (continueOnFail)")
+
     initial_state = {
         "task_type": "daily_digest",
         "request_id": request_id,
@@ -694,6 +975,8 @@ async def daily_digest(
         "digest_upcoming_events": [],
         "digest_pending_agreements": [],
         "digest_overdue_deadlines": [],
+        "digest_checklist_items_due": [],
+        "digest_monthly_stats": monthly_stats,
         "reminders_due": [],
         "errors": [],
     }
@@ -733,3 +1016,498 @@ async def staff_roster(
         "staff": STAFF_ROSTER,
         "max_leads_per_month": MAX_LEADS_PER_STAFF_PER_MONTH,
     }
+
+
+# ============================================================
+# Revenue & Reporting endpoints (API key auth)
+# ============================================================
+
+@app.post("/api/v1/reservation/{request_id}/complete", response_model=CompleteReservationResponse)
+async def complete_reservation_endpoint(
+    request_id: str,
+    body: CompleteReservationRequest,
+    _auth: str = Security(verify_api_key),
+):
+    """Mark an approved reservation as completed and record actual revenue/attendance."""
+    reservation = await get_reservation(request_id)
+    if not reservation:
+        raise HTTPException(status_code=404, detail="Reservation not found")
+    if reservation["status"] != "approved":
+        raise HTTPException(
+            status_code=400,
+            detail=f"Reservation is '{reservation['status']}', only 'approved' reservations can be completed",
+        )
+
+    updated = await complete_reservation(
+        request_id=request_id,
+        actual_revenue=float(body.actual_revenue) if body.actual_revenue is not None else None,
+        actual_attendance=body.actual_attendance,
+        event_department=body.event_department,
+    )
+    if not updated:
+        raise HTTPException(status_code=409, detail="Failed to complete reservation")
+
+    await add_audit_entry(
+        reservation_id=updated["id"],
+        action="reservation_completed",
+        actor="admin",
+        details={
+            "actual_revenue": float(body.actual_revenue) if body.actual_revenue is not None else None,
+            "actual_attendance": body.actual_attendance,
+            "event_department": body.event_department,
+            "notes": body.notes,
+        },
+    )
+
+    logger.info("Reservation %s completed", request_id)
+
+    return CompleteReservationResponse(
+        request_id=request_id,
+        status=updated["status"],
+        actual_revenue=float(updated["actual_revenue"]) if updated.get("actual_revenue") is not None else None,
+        actual_attendance=updated.get("actual_attendance"),
+        event_department=updated.get("event_department"),
+        completed_at=str(updated["completed_at"]) if updated.get("completed_at") else None,
+    )
+
+
+def _validate_report_params(period: str, start: str) -> date:
+    """Validate and parse common report query parameters."""
+    if period not in ("week", "month", "quarter", "year"):
+        raise HTTPException(status_code=400, detail="Period must be one of: week, month, quarter, year")
+    try:
+        return date.fromisoformat(start) if start else date.today().replace(day=1)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid start date format. Use YYYY-MM-DD.")
+
+
+@app.get("/api/v1/reports/revenue", response_model=RevenueReportResponse)
+async def revenue_report(
+    period: str = "month",
+    start: str = "",
+    _auth: str = Security(verify_api_key),
+):
+    """Revenue aggregation report for a given period."""
+    start_date = _validate_report_params(period, start)
+    result = await get_revenue_report(period, start_date)
+    return RevenueReportResponse(**result)
+
+
+@app.get("/api/v1/reports/conversion-funnel", response_model=ConversionFunnelResponse)
+async def conversion_funnel(
+    period: str = "month",
+    start: str = "",
+    _auth: str = Security(verify_api_key),
+):
+    """Conversion funnel showing reservation counts by stage."""
+    start_date = _validate_report_params(period, start)
+    result = await get_conversion_funnel(period, start_date)
+    return ConversionFunnelResponse(**result)
+
+
+@app.get("/api/v1/reports/export")
+async def export_report(
+    format: str = "csv",
+    period: str = "month",
+    start: str = "",
+    _auth: str = Security(verify_api_key),
+):
+    """Export reservation data as CSV."""
+    if format != "csv":
+        raise HTTPException(status_code=400, detail="Only 'csv' format is currently supported")
+
+    start_date = _validate_report_params(period, start)
+    rows = await get_reservations_for_export(period, start_date)
+
+    output = io.StringIO()
+    if rows:
+        writer = csv.DictWriter(output, fieldnames=rows[0].keys())
+        writer.writeheader()
+        for row in rows:
+            writer.writerow({k: str(v) if v is not None else "" for k, v in row.items()})
+    else:
+        output.write("No data for the selected period.\n")
+
+    output.seek(0)
+    return StreamingResponse(
+        iter([output.getvalue()]),
+        media_type="text/csv",
+        headers={"Content-Disposition": f"attachment; filename=reservations_{period}_{start}.csv"},
+    )
+
+
+@app.get("/api/v1/reports/top-organizations", response_model=TopOrganizationsResponse)
+async def top_organizations(
+    period: str = "quarter",
+    start: str = "",
+    limit: int = 10,
+    _auth: str = Security(verify_api_key),
+):
+    """Top organizations by number of bookings."""
+    start_date = _validate_report_params(period, start)
+    if limit < 1 or limit > 100:
+        raise HTTPException(status_code=400, detail="Limit must be between 1 and 100")
+
+    rows = await get_top_organizations(period, start_date, limit)
+
+    from app.db.report_queries import _compute_end_date
+    end_date = _compute_end_date(start_date, period)
+
+    return TopOrganizationsResponse(
+        period=period,
+        start=start_date.isoformat(),
+        end=end_date.isoformat(),
+        limit=limit,
+        organizations=rows,
+    )
+
+
+# ============================================================
+# Compliance Checklist endpoints (API key auth)
+# ============================================================
+
+@app.get("/api/v1/checklist/{request_id}", response_model=ChecklistResponse)
+async def get_event_checklist(
+    request_id: str,
+    _auth: str = Security(verify_api_key),
+):
+    """Get all checklist items for an event, with computed deadline info."""
+    reservation = await get_reservation(request_id)
+    if not reservation:
+        raise HTTPException(status_code=404, detail="Reservation not found")
+
+    items = await get_checklist(reservation["id"])
+    today = date.today()
+
+    response_items = []
+    overdue_count = 0
+    completed_count = 0
+    pending_count = 0
+    for item in items:
+        dl = item.get("deadline_date")
+        if dl:
+            days_until = (dl - today).days
+            is_overdue = days_until < 0 and item["status"] in ("pending", "in_review")
+        else:
+            days_until = None
+            is_overdue = False
+
+        if is_overdue:
+            overdue_count += 1
+        if item["status"] == "completed":
+            completed_count += 1
+        if item["status"] in ("pending", "in_review"):
+            pending_count += 1
+
+        response_items.append(ChecklistItemResponse(
+            id=str(item["id"]),
+            item_key=item["item_key"],
+            item_label=item["item_label"],
+            required=item["required"],
+            status=item["status"],
+            deadline_date=dl.isoformat() if dl else None,
+            days_until_deadline=days_until,
+            is_overdue=is_overdue,
+            completed_at=str(item["completed_at"]) if item.get("completed_at") else None,
+            completed_by=item.get("completed_by"),
+            notes=item.get("notes"),
+        ))
+
+    return ChecklistResponse(
+        request_id=request_id,
+        items=response_items,
+        total=len(response_items),
+        completed=completed_count,
+        pending=pending_count,
+        overdue=overdue_count,
+    )
+
+
+@app.post("/api/v1/checklist/{request_id}/bulk-update", response_model=BulkChecklistUpdateResponse)
+async def bulk_update_checklist(
+    request_id: str,
+    body: BulkChecklistUpdateRequest,
+    _auth: str = Security(verify_api_key),
+):
+    """Update multiple checklist items at once."""
+    reservation = await get_reservation(request_id)
+    if not reservation:
+        raise HTTPException(status_code=404, detail="Reservation not found")
+
+    update_items = [
+        {"item_key": item.item_key, "status": item.status, "notes": item.notes}
+        for item in body.items
+    ]
+    count = await bulk_update_checklist_items(reservation["id"], update_items)
+
+    await add_audit_entry(
+        reservation_id=reservation["id"],
+        action="checklist_bulk_update",
+        actor="admin",
+        details={"items_updated": count, "items_requested": len(body.items)},
+    )
+
+    return BulkChecklistUpdateResponse(
+        request_id=request_id,
+        updated_count=count,
+    )
+
+
+@app.post("/api/v1/checklist/{request_id}/{item_key}")
+async def update_checklist_item_endpoint(
+    request_id: str,
+    item_key: str,
+    body: ChecklistItemUpdateRequest,
+    _auth: str = Security(verify_api_key),
+):
+    """Update a single checklist item."""
+    reservation = await get_reservation(request_id)
+    if not reservation:
+        raise HTTPException(status_code=404, detail="Reservation not found")
+
+    updated = await update_checklist_item(
+        reservation_id=reservation["id"],
+        item_key=item_key,
+        status=body.status,
+        notes=body.notes,
+    )
+    if not updated:
+        raise HTTPException(status_code=404, detail="Checklist item not found")
+
+    await add_audit_entry(
+        reservation_id=reservation["id"],
+        action=f"checklist_item_{body.status}",
+        actor="admin",
+        details={"item_key": item_key, "notes": body.notes},
+    )
+
+    return {
+        "request_id": request_id,
+        "item_key": item_key,
+        "status": updated["status"],
+        "completed_at": str(updated["completed_at"]) if updated.get("completed_at") else None,
+    }
+
+
+@app.get("/api/v1/reports/compliance", response_model=ComplianceReportResponse)
+async def compliance_report(
+    period: str = "quarter",
+    start: str = "",
+    _auth: str = Security(verify_api_key),
+):
+    """Compliance report: on-time rates, overdue items, completion stats."""
+    start_date = _validate_report_params(period, start)
+    result = await get_compliance_report(period, start_date)
+    return ComplianceReportResponse(**result)
+
+
+# ============================================================
+# Dynamic Quote Versioning endpoints (API key auth)
+# ============================================================
+
+def _quote_to_response(q: dict) -> QuoteVersionResponse:
+    """Convert a DB quote row to a response model."""
+    return QuoteVersionResponse(
+        id=str(q["id"]) if q.get("id") else None,
+        reservation_id=str(q["reservation_id"]) if q.get("reservation_id") else None,
+        version=q.get("version", 1),
+        line_items=[QuoteLineItem(**item) for item in (q.get("line_items") or [])],
+        subtotal=float(q.get("subtotal", 0)),
+        deposit_amount=float(q.get("deposit_amount", 0)),
+        total=float(q.get("total", 0)),
+        changes_from_previous=q.get("changes_from_previous"),
+        notes=q.get("notes"),
+        created_by=q.get("created_by"),
+        created_at=str(q["created_at"]) if q.get("created_at") else None,
+    )
+
+
+@app.post("/api/v1/quote/generate/{request_id}", response_model=QuoteGenerateResponse)
+async def generate_quote(
+    request_id: str,
+    _auth: str = Security(verify_api_key),
+):
+    """Generate an initial quote (version 1) from reservation data."""
+    reservation = await get_reservation(request_id)
+    if not reservation:
+        raise HTTPException(status_code=404, detail="Reservation not found")
+
+    quote_data = build_initial_quote(reservation)
+    quote_id = await create_quote_version(reservation["id"], quote_data)
+    email_snippet = format_quote_for_email(quote_data)
+
+    await add_audit_entry(
+        reservation_id=reservation["id"],
+        action="quote_generated",
+        actor="admin",
+        details={"version": 1, "total": quote_data["total"]},
+    )
+
+    quote_data["id"] = str(quote_id)
+    quote_data["reservation_id"] = str(reservation["id"])
+
+    return QuoteGenerateResponse(
+        reservation_id=request_id,
+        quote=QuoteVersionResponse(
+            id=str(quote_id),
+            reservation_id=str(reservation["id"]),
+            version=quote_data["version"],
+            line_items=[QuoteLineItem(**item) for item in quote_data["line_items"]],
+            subtotal=quote_data["subtotal"],
+            deposit_amount=quote_data["deposit_amount"],
+            total=quote_data["total"],
+        ),
+        email_snippet=email_snippet,
+    )
+
+
+@app.post("/api/v1/quote/update/{request_id}", response_model=QuoteUpdateResponse)
+async def update_quote_endpoint(
+    request_id: str,
+    body: QuoteUpdateRequest,
+    _auth: str = Security(verify_api_key),
+):
+    """Add or remove services, creating a new quote version with diff."""
+    reservation = await get_reservation(request_id)
+    if not reservation:
+        raise HTTPException(status_code=404, detail="Reservation not found")
+
+    latest = await get_latest_quote(reservation["id"])
+    if not latest:
+        raise HTTPException(status_code=404, detail="No existing quote found. Generate one first.")
+
+    # Convert DB row to the format update_quote expects
+    current = {
+        "version": latest["version"],
+        "line_items": latest["line_items"],
+        "subtotal": float(latest["subtotal"]),
+        "deposit_amount": float(latest["deposit_amount"]),
+        "total": float(latest["total"]),
+    }
+
+    add_svcs = [{"service": s.service, "hours": s.hours, "count": s.count} for s in body.add_services]
+    new_quote = update_quote(current, add_services=add_svcs, remove_services=body.remove_services)
+    if body.notes:
+        new_quote["notes"] = body.notes
+
+    quote_id = await create_quote_version(
+        reservation["id"], new_quote, notes=body.notes, created_by="admin",
+    )
+    email_snippet = format_quote_for_email(new_quote)
+
+    await add_audit_entry(
+        reservation_id=reservation["id"],
+        action="quote_updated",
+        actor="admin",
+        details={
+            "version": new_quote["version"],
+            "total": new_quote["total"],
+            "changes": new_quote.get("changes_from_previous"),
+        },
+    )
+
+    return QuoteUpdateResponse(
+        reservation_id=request_id,
+        quote=QuoteVersionResponse(
+            id=str(quote_id),
+            reservation_id=str(reservation["id"]),
+            version=new_quote["version"],
+            line_items=[QuoteLineItem(**item) for item in new_quote["line_items"]],
+            subtotal=new_quote["subtotal"],
+            deposit_amount=new_quote["deposit_amount"],
+            total=new_quote["total"],
+            changes_from_previous=new_quote.get("changes_from_previous"),
+            notes=body.notes,
+        ),
+        email_snippet=email_snippet,
+        changes=new_quote.get("changes_from_previous"),
+    )
+
+
+@app.get("/api/v1/quote/history/{request_id}", response_model=QuoteHistoryResponse)
+async def quote_history(
+    request_id: str,
+    _auth: str = Security(verify_api_key),
+):
+    """Get all quote versions for a reservation."""
+    reservation = await get_reservation(request_id)
+    if not reservation:
+        raise HTTPException(status_code=404, detail="Reservation not found")
+
+    versions = await get_quote_history(reservation["id"])
+    current_version = versions[-1]["version"] if versions else 0
+
+    return QuoteHistoryResponse(
+        reservation_id=request_id,
+        versions=[_quote_to_response(v) for v in versions],
+        current_version=current_version,
+    )
+
+
+@app.get("/api/v1/quote/latest/{request_id}", response_model=QuoteVersionResponse)
+async def quote_latest(
+    request_id: str,
+    _auth: str = Security(verify_api_key),
+):
+    """Get the latest quote version for a reservation."""
+    reservation = await get_reservation(request_id)
+    if not reservation:
+        raise HTTPException(status_code=404, detail="Reservation not found")
+
+    latest = await get_latest_quote(reservation["id"])
+    if not latest:
+        raise HTTPException(status_code=404, detail="No quote found for this reservation")
+
+    return _quote_to_response(latest)
+
+
+# ============================================================
+# Process Insights & Quarterly Report endpoints (API key auth)
+# ============================================================
+
+@app.get("/api/v1/reports/process-insights", response_model=ProcessInsightsResponse)
+async def process_insights(
+    period: str = "quarter",
+    start: str = "",
+    _auth: str = Security(verify_api_key),
+):
+    """Full process insights report with all metrics sections."""
+    start_date = _validate_report_params(period, start)
+    report = await build_quarterly_report(start_date)
+    return ProcessInsightsResponse(**report)
+
+
+@app.post("/api/v1/reports/generate-quarterly", response_model=QuarterlyReportResponse)
+async def generate_quarterly_report(
+    body: QuarterlyReportRequest,
+    _auth: str = Security(verify_api_key),
+):
+    """Generate a quarterly report and optionally email it to admin."""
+    try:
+        start_date = date.fromisoformat(body.quarter_start)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid quarter_start format. Use YYYY-MM-DD.")
+
+    report = await build_quarterly_report(start_date)
+
+    email_sent = False
+    if body.send_email:
+        logger.info("Quarterly report email requested for %s", body.quarter_start)
+        email_sent = True  # Actual sending handled by N8N webhook
+
+    try:
+        await add_audit_entry(
+            reservation_id=None,
+            action="quarterly_report_generated",
+            actor="admin",
+            details={"quarter_start": body.quarter_start, "email_sent": email_sent},
+        )
+    except Exception:
+        logger.exception("Audit entry for quarterly report failed")
+
+    from datetime import datetime
+    return QuarterlyReportResponse(
+        report=ProcessInsightsResponse(**report),
+        generated_at=datetime.now().isoformat(),
+        email_sent=email_sent,
+    )

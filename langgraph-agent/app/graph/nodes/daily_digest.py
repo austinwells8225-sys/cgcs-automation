@@ -118,13 +118,42 @@ def build_daily_digest(state: AgentState) -> dict:
     else:
         sections.append("  No overdue deadlines.")
 
-    # Section 7: Deadline Reference
+    # Section 7: Checklist Items Due This Week
+    checklist_due = state.get("digest_checklist_items_due", [])
+    sections.append("\n## CHECKLIST ITEMS DUE THIS WEEK")
+    if checklist_due:
+        for item in checklist_due:
+            dl_date = item.get("deadline_date", "N/A")
+            days = item.get("days_until_due")
+            days_str = f" ({days} days)" if days is not None else ""
+            sections.append(
+                f"  - {item.get('event_name', 'Unknown')} | "
+                f"{item.get('item_label', item.get('checklist_task', 'Unknown'))} | "
+                f"Due: {dl_date}{days_str}"
+            )
+    else:
+        sections.append("  No checklist items due this week.")
+
+    # Section 8: Deadline Reference
     sections.append("\n## DEADLINE REFERENCE")
     sections.append(f"  CGCS Response: {DEADLINES['cgcs_response']} business days")
     sections.append(f"  TDX AV Request: {DEADLINES['tdx_av']} business days")
     sections.append(f"  Walkthrough: {DEADLINES['walkthrough']} business days")
     sections.append(f"  ACC Catering: {DEADLINES['catering_acc']} business days")
     sections.append(f"  Run of Show/Furniture: {DEADLINES['run_of_show_furniture']} business days")
+
+    # Section 9: Quick Stats — This Month
+    monthly_stats = state.get("digest_monthly_stats", {})
+    sections.append("\n## QUICK STATS — THIS MONTH")
+    if monthly_stats:
+        sections.append(f"  Events this month: {monthly_stats.get('events_this_month', 'N/A')}")
+        revenue = monthly_stats.get("revenue_this_month")
+        sections.append(f"  Revenue this month: ${revenue:,.2f}" if revenue is not None else "  Revenue this month: N/A")
+        sections.append(f"  Pending approvals: {monthly_stats.get('pending_approvals', 'N/A')}")
+        rate = monthly_stats.get("on_time_checklist_rate")
+        sections.append(f"  On-time checklist rate: {rate}%" if rate is not None else "  On-time checklist rate: N/A")
+    else:
+        sections.append("  Stats unavailable.")
 
     digest_body = "\n".join(sections)
 

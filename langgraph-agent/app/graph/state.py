@@ -40,6 +40,7 @@ class AgentState(TypedDict, total=False):
     email_category: Optional[str]  # 'event_request', 'question', 'complaint', 'follow_up', 'spam', 'other'
     email_draft_reply: Optional[str]
     email_auto_send: Optional[bool]
+    email_rejection_lessons: Optional[str]
 
     # --- Calendar check fields ---
     calendar_query_date: Optional[str]
@@ -79,9 +80,14 @@ class AgentState(TypedDict, total=False):
     digest_upcoming_events: Optional[list[dict]]
     digest_pending_agreements: Optional[list[dict]]
     digest_overdue_deadlines: Optional[list[dict]]
+    digest_checklist_items_due: Optional[list[dict]]
+    digest_monthly_stats: Optional[dict]
 
     # --- Event type ---
     event_type: Optional[str]  # S-EVENT, C-EVENT, A-EVENT
+
+    # --- Quote fields ---
+    quote_email_snippet: Optional[str]
 
 
 # Backward compatibility alias

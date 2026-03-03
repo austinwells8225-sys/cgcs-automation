@@ -1,0 +1,2 @@
+-- Migration 006: Reserved (compliance checklist is in 007)
+-- No changes in this file.

@@ -166,10 +166,12 @@ class TestEvaluateEndpoint:
 
 
 class TestApproveEndpoint:
+    @patch("app.main.insert_checklist_items", new_callable=AsyncMock)
+    @patch("app.main.build_checklist_for_event", return_value=[])
     @patch("app.main.get_reservation", new_callable=AsyncMock)
     @patch("app.main.approve_reservation", new_callable=AsyncMock)
     @patch("app.main.add_audit_entry", new_callable=AsyncMock)
-    def test_approve_reservation(self, mock_audit, mock_approve, mock_get):
+    def test_approve_reservation(self, mock_audit, mock_approve, mock_get, mock_build_cl, mock_insert_cl):
         mock_get.return_value = {
             "id": "test-uuid",
             "request_id": "form-test123",

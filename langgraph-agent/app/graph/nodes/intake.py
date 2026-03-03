@@ -231,6 +231,7 @@ def draft_approval_response(state: AgentState) -> dict:
     room_key = state.get("room_assignment", "multipurpose")
     room_name = ROOM_CONFIGS.get(room_key, {}).get("display_name", room_key)
 
+    quote_snippet = state.get("quote_email_snippet", "")
     prompt = APPROVAL_RESPONSE_SYSTEM_PROMPT.format(
         requester_name=_sanitize_string(state.get("requester_name", "")),
         organization=_sanitize_string(state.get("requester_organization", "Not specified")),
@@ -242,6 +243,7 @@ def draft_approval_response(state: AgentState) -> dict:
         setup_details=json.dumps(state.get("setup_config", {}), indent=2),
         pricing_tier=state.get("pricing_tier", "external"),
         estimated_cost=state.get("estimated_cost", 0),
+        quote_details=quote_snippet if quote_snippet else "No itemized quote available.",
     )
 
     try:

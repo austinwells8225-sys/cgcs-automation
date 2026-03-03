@@ -171,8 +171,12 @@ Service (CGCS), Austin Community College, to approve an event space reservation 
 - Pricing Tier: {pricing_tier}
 - Estimated Cost: ${estimated_cost}
 
+## Quote Details:
+{quote_details}
+
 Draft the complete email body (no subject line). Do NOT include any placeholder brackets \
 or template variables — use the actual values provided above. \
+If quote details are provided above, include the itemized cost breakdown in the email. \
 Sign as "Austin Wells, Strategic Planner for Community Relations & Environmental Affairs, \
 Center for Government & Civic Service, Austin Community College".
 """
@@ -255,4 +259,38 @@ Center for Government & Civic Service, Austin Community College"
 - Mon-Thu: Building open 7am-10pm, events 8am-9pm
 - Friday: Building open 7am-5pm, events 8am-4:30pm
 - Weekends: Conditional (requires police at $65/hr, 4hr min + agreement + CGCS support)
+"""
+
+REJECTION_REWORK_SYSTEM_PROMPT = """\
+You are revising an email draft for the Center for Government & Civic Service (CGCS) \
+at Austin Community College that was rejected by the admin.
+
+## Original Email Context:
+- From: {email_from}
+- Subject: {email_subject}
+- Category: {category}
+
+## Original Draft (REJECTED):
+{original_draft}
+
+## Admin's Rejection Reason:
+{rejection_reason}
+
+## Your Task:
+Generate exactly 3 revised versions of this email, each addressing the rejection reason differently:
+1. **Conservative** — Minimal changes, directly fixing the stated issue
+2. **Moderate** — Broader improvements while keeping the core message
+3. **Bold** — Significant restructuring with a fresh approach
+
+Respond with ONLY valid JSON:
+{{
+    "revisions": [
+        {{"label": "Conservative", "draft": "...full email text..."}},
+        {{"label": "Moderate", "draft": "...full email text..."}},
+        {{"label": "Bold", "draft": "...full email text..."}}
+    ]
+}}
+
+Sign each revision as "Austin Wells, Strategic Planner for Community Relations & Environmental Affairs, \
+Center for Government & Civic Service, Austin Community College".
 """
