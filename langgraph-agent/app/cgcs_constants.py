@@ -66,8 +66,12 @@ def get_labor_rate(staff_name: str) -> float:
 ADMIN_EMAIL = "austin.wells@austincc.edu"
 ADMIN_TITLE = "Strategic Planner for Community Relations & Environmental Affairs"
 
-CGCS_ZOHO_EMAIL = "admin@cgcsacc.org"
-ZOHO_USER_ID = "879105889"
+# Current system email (Zoho) — being migrated to Google Workspace
+CGCS_ZOHO_EMAIL = "admin@cgcsacc.org"  # LEGACY — will be retired
+ZOHO_USER_ID = "879105889"              # LEGACY — will be retired
+
+# Google Workspace system email (future primary)
+CGCS_SYSTEM_EMAIL = "admin@cgcs-acc.org"
 
 CGCS_WEBSITE = "https://www.cgcsacc.org"
 

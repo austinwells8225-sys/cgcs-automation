@@ -1001,11 +1001,12 @@ $$ LANGUAGE plpgsql;
 | Read sheet | GET | `/v4/spreadsheets/{spreadsheetId}/values/{range}` |
 | Apply update | PUT | `/v4/spreadsheets/{spreadsheetId}/values/{range}?valueInputOption=USER_ENTERED` |
 
-### 10.3 Zoho Mail API
+### 10.3 Zoho Mail API (LEGACY — being migrated to Gmail API)
 
 **File:** `langgraph-agent/app/services/zoho_mail.py`
 **Authentication:** OAuth token (ZOHO_MAIL_TOKEN)
 **Base URL:** `https://mail.zoho.com/api`
+**System email:** `admin@cgcsacc.org` (current)
 
 | Operation | Method | Endpoint |
 |-----------|--------|----------|
@@ -1013,6 +1014,8 @@ $$ LANGUAGE plpgsql;
 | Send email | POST | `/accounts/{accountId}/messages` |
 
 **Retry:** 3 attempts with exponential backoff. HTTP client timeout: 30s.
+
+**Migration note:** This service will be replaced with Gmail API once the Google Workspace account (`admin@cgcs-acc.org`) is fully configured. The service interface (`fetch_unread`, `send_email`) will remain the same — only the underlying provider changes.
 
 ### 10.4 Anthropic Claude API
 
@@ -1852,11 +1855,51 @@ Purpose-built admin dashboard (see Section 12.4).
 
 ### B. Contact Information
 
-| Role | Name | Email |
-|------|------|-------|
-| CGCS Admin | Austin Wells | austin.wells@austincc.edu |
-| CGCS Zoho Account | Admin | admin@cgcsacc.org |
-| Zoho User ID | - | 879105889 |
+| Role | Name | Email | Notes |
+|------|------|-------|-------|
+| CGCS Admin (personal) | Austin Wells | austin.wells@austincc.edu | ACC work email — digest recipient, not system email |
+| CGCS System Email (current) | Admin | admin@cgcsacc.org | Zoho Mail — LEGACY, being retired |
+| CGCS System Email (future) | Admin | admin@cgcs-acc.org | Google Workspace — primary system email going forward |
+| Zoho User ID | - | 879105889 | LEGACY — will be retired with Zoho migration |
+
+### B.1 Email & Account Architecture
+
+**Current state:**
+- Intake form submissions → received by Zoho Mail at `admin@cgcsacc.org`
+- Outbound emails to requesters → sent via Zoho Mail API from `admin@cgcsacc.org`
+- Daily digest → sent to Austin's personal work email (`austin.wells@austincc.edu`)
+- GitHub repo → under personal account `austinwells-pixel/cgcs-automation`
+
+**Target state:**
+- Intake form submissions → received by Google Workspace at `admin@cgcs-acc.org`
+- Outbound emails → sent via Gmail API from `admin@cgcs-acc.org`
+- Daily digest → sent to `admin@cgcs-acc.org` (organizational inbox)
+- GitHub repo → under organization account `cgcs-acc/cgcs-automation`
+
+**Migration plan:**
+
+| Step | Action | Status |
+|------|--------|--------|
+| 1 | Purchase Google Workspace (`admin@cgcs-acc.org`) | Done |
+| 2 | Create GitHub organization (`cgcs-acc`) | Pending (payment processing) |
+| 3 | Transfer repo from `austinwells-pixel` to `cgcs-acc` org | Pending |
+| 4 | Add coworker as GitHub org owner | Pending |
+| 5 | Point intake form webhook to `admin@cgcs-acc.org` | Pending |
+| 6 | Replace Zoho Mail integration with Gmail API | Pending |
+| 7 | Update `ADMIN_EMAIL` to organizational email | Pending |
+| 8 | Update Google Calendar service account under Workspace | Pending |
+| 9 | Retire Zoho Mail account | Pending |
+
+**Why this matters for continuity:**
+- `@austincc.edu` emails are tied to individual employees — they leave when the person leaves
+- `admin@cgcs-acc.org` is organizational — it survives staff turnover
+- GitHub org ensures the repo doesn't live under anyone's personal account
+- The SOP reduces to: "here's the org login, here's the .env on the server"
+
+**Developer accounts (personal, non-transferable — by design):**
+- Claude Code — each developer uses their own account
+- LangSmith — each developer uses their own login
+- GitHub — contributors use personal accounts, org owns the repo
 
 ### C. External URLs
 
@@ -1870,7 +1913,7 @@ Purpose-built admin dashboard (see Section 12.4).
 | Version | Date | Description |
 |---------|------|-------------|
 | 1.0 | 2026-03-02 | Initial technical specification (8 capabilities, 19 endpoints, 96 tests) |
-| 2.0 | 2026-03-03 | Added 6 capability modules, labor rates, LangSmith HITL architecture, composable agent roadmap (12 capabilities, 38 endpoints, 228 tests) |
+| 2.0 | 2026-03-03 | Added 6 capability modules, labor rates, LangSmith HITL architecture, composable agent roadmap, email/account migration plan from Zoho to Google Workspace (12 capabilities, 38 endpoints, 228 tests) |
 
 ---
 
