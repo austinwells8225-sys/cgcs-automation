@@ -24,7 +24,7 @@ from app.db.queries import (
     resolve_dead_letter,
 )
 from app.graph.builder import build_graph
-from app.cgcs_constants import build_acknowledgment_email, build_checklist_for_event
+from app.services.intake_processor import _format_event_date
 from app.db.checklist_queries import (
     bulk_update_checklist_items,
     get_checklist,
@@ -58,6 +58,22 @@ from app.services.process_insights import (
     get_monthly_quick_stats,
 )
 from app.services.quote_builder import build_initial_quote, format_quote_for_email, update_quote
+from app.db.alert_queries import (
+    create_alert,
+    dismiss_alert,
+    get_active_alerts,
+)
+from app.services.smartsheet_parser import is_smartsheet_intake, parse_smartsheet_intake
+from app.services.date_utils import business_days_until, is_within_minimum_lead_time
+from app.services.intake_classifier import classify_request
+from app.services.error_handler import classify_error, build_error_alert
+from app.cgcs_constants import (
+    build_acknowledgment_email,
+    build_checklist_for_event,
+    build_intake_acknowledgment_email,
+    MINIMUM_LEAD_TIME_BD,
+    CGCS_SYSTEM_EMAIL,
+)
 from app.models import (
     AcknowledgeRequest,
     AcknowledgeResponse,
@@ -106,6 +122,12 @@ from app.models import (
     ProcessInsightsResponse,
     QuarterlyReportRequest,
     QuarterlyReportResponse,
+    DashboardAlertResponse,
+    DashboardAlertsListResponse,
+    SmartsheetWebhookRequest,
+    EmailReplyWebhookRequest,
+    AdminResponseWebhookRequest,
+    PoliceConfirmedWebhookRequest,
 )
 
 logging.basicConfig(level=settings.log_level)
@@ -1511,3 +1533,241 @@ async def generate_quarterly_report(
         generated_at=datetime.now().isoformat(),
         email_sent=email_sent,
     )
+
+
+# ============================================================
+# N8N Webhook endpoints (webhook secret auth)
+# ============================================================
+
+@app.post("/webhook/smartsheet-new-entry")
+async def webhook_smartsheet_new_entry(
+    body: SmartsheetWebhookRequest,
+    _auth: str = Security(verify_webhook_secret),
+):
+    """Full intake pipeline: parse → 14-day check → classify → ack → P.E.T. + calendar → draft."""
+    request_id = f"ss-{uuid.uuid4().hex[:12]}"
+    logger.info("Smartsheet intake webhook: %s", request_id)
+
+    # 1. Validate Smartsheet email
+    if not is_smartsheet_intake(body.subject, body.sender):
+        return {"request_id": request_id, "status": "skipped", "reason": "Not a Smartsheet intake email"}
+
+    # 2. Parse
+    parsed = parse_smartsheet_intake(body.subject, body.body)
+    if not parsed.get("event_name"):
+        return {"request_id": request_id, "status": "error", "reason": "Could not parse event name from email"}
+
+    # 3. 14-day lead time check
+    event_date = parsed.get("event_start_date")
+    if event_date and not is_within_minimum_lead_time(event_date, MINIMUM_LEAD_TIME_BD):
+        bd = business_days_until(event_date)
+        return {
+            "request_id": request_id,
+            "status": "rejected",
+            "reason": f"Event is only {bd} business days away (minimum {MINIMUM_LEAD_TIME_BD} required)",
+            "event_name": parsed.get("event_name"),
+        }
+
+    # 4. Run smartsheet_intake graph (classify + draft)
+    initial_state = {
+        "task_type": "smartsheet_intake",
+        "request_id": request_id,
+        "smartsheet_parsed": parsed,
+        "errors": [],
+    }
+
+    try:
+        result = compiled_graph.invoke(
+            initial_state,
+            config=_run_config("smartsheet_intake", request_id),
+        )
+    except Exception as e:
+        logger.exception("Smartsheet intake pipeline failed for %s", request_id)
+        try:
+            await add_dead_letter(
+                request_id=request_id,
+                payload=initial_state,
+                error_message=f"{type(e).__name__}: {e}",
+                error_type="smartsheet_intake_failure",
+            )
+            err_class = classify_error(e)
+            if err_class["should_alert"]:
+                await create_alert(**build_error_alert(e, f"Smartsheet intake {request_id}", request_id))
+        except Exception:
+            logger.exception("CRITICAL: Failed to write to DLQ/alert")
+
+        return {"request_id": request_id, "status": "error", "reason": str(e)}
+
+    # 5. Build acknowledgment email (continueOnFail)
+    ack_email = None
+    try:
+        date_str = _format_event_date(event_date) if event_date else ""
+        ack_email = build_intake_acknowledgment_email(
+            parsed.get("requestor_name", ""),
+            parsed.get("event_name", ""),
+            date_str,
+        )
+    except Exception:
+        logger.exception("Acknowledgment email build failed (continueOnFail)")
+
+    return {
+        "request_id": request_id,
+        "status": "processed",
+        "difficulty": result.get("intake_difficulty"),
+        "auto_send": result.get("email_auto_send", False),
+        "draft_response": result.get("draft_response"),
+        "draft_emails": result.get("intake_draft_emails", []),
+        "acknowledgment": ack_email,
+        "parsed": parsed,
+    }
+
+
+@app.post("/webhook/email-reply")
+async def webhook_email_reply(
+    body: EmailReplyWebhookRequest,
+    _auth: str = Security(verify_webhook_secret),
+):
+    """Process a reply in an existing event thread."""
+    request_id = body.request_id or f"reply-{uuid.uuid4().hex[:12]}"
+    logger.info("Email reply webhook: %s thread=%s", request_id, body.thread_id)
+
+    initial_state = {
+        "task_type": "email_reply",
+        "request_id": request_id,
+        "reply_body": body.reply_body,
+        "edit_loop_count": body.edit_loop_count,
+        "failed_replies": body.failed_replies,
+        "smartsheet_parsed": body.smartsheet_parsed or {},
+        "errors": [],
+    }
+
+    try:
+        result = compiled_graph.invoke(
+            initial_state,
+            config=_run_config("email_reply", request_id),
+        )
+    except Exception as e:
+        logger.exception("Email reply processing failed for %s", request_id)
+        try:
+            await add_dead_letter(
+                request_id=request_id,
+                payload=initial_state,
+                error_message=f"{type(e).__name__}: {e}",
+                error_type="email_reply_failure",
+            )
+        except Exception:
+            logger.exception("CRITICAL: Failed to write to DLQ")
+        return {"request_id": request_id, "status": "error", "reason": str(e)}
+
+    # Create dashboard alerts for AV/catering changes (continueOnFail)
+    for alert_data in result.get("reply_alerts", []):
+        try:
+            await create_alert(**alert_data)
+        except Exception:
+            logger.exception("Failed to create alert (continueOnFail)")
+
+    return {
+        "request_id": request_id,
+        "thread_id": body.thread_id,
+        "status": "processed",
+        "action": result.get("reply_action"),
+        "edit_loop_count": result.get("edit_loop_count"),
+        "escalation_detected": result.get("escalation_detected", False),
+        "escalation_forward_to": result.get("escalation_forward_to"),
+        "draft_response": result.get("draft_response"),
+        "draft_emails": result.get("reply_draft_emails", []),
+        "alerts_created": len(result.get("reply_alerts", [])),
+        "decision": result.get("decision"),
+    }
+
+
+@app.post("/webhook/admin-response")
+async def webhook_admin_response(
+    body: AdminResponseWebhookRequest,
+    _auth: str = Security(verify_webhook_secret),
+):
+    """Admin approves, rejects, or edits a draft from the dashboard."""
+    logger.info("Admin response webhook: email=%s action=%s", body.email_id, body.action)
+
+    await add_audit_entry(
+        reservation_id=None,
+        action=f"admin_draft_{body.action}",
+        actor="admin",
+        details={
+            "email_id": body.email_id,
+            "has_edit": body.edited_text is not None,
+        },
+    )
+
+    return {
+        "email_id": body.email_id,
+        "action": body.action,
+        "status": "approved" if body.action == "approve" else body.action,
+        "edited": body.edited_text is not None,
+    }
+
+
+@app.post("/webhook/police-confirmed")
+async def webhook_police_confirmed(
+    body: PoliceConfirmedWebhookRequest,
+    _auth: str = Security(verify_webhook_secret),
+):
+    """Officer Ortiz confirmed police coverage for an event."""
+    request_id = body.request_id or f"police-{uuid.uuid4().hex[:12]}"
+    logger.info("Police confirmed webhook: %s", request_id)
+
+    await add_audit_entry(
+        reservation_id=None,
+        action="police_coverage_confirmed",
+        actor="police",
+        details={
+            "request_id": request_id,
+            "sender": body.sender,
+            "reply_excerpt": body.reply_body[:500],
+        },
+    )
+
+    return {
+        "request_id": request_id,
+        "status": "confirmed",
+        "sender": body.sender,
+    }
+
+
+# ============================================================
+# Dashboard Alerts endpoints (API key auth)
+# ============================================================
+
+@app.get("/api/v1/alerts/active", response_model=DashboardAlertsListResponse)
+async def list_active_alerts(
+    _auth: str = Security(verify_api_key),
+):
+    """Return all active dashboard alerts."""
+    alerts = await get_active_alerts()
+    return DashboardAlertsListResponse(
+        count=len(alerts),
+        alerts=[
+            DashboardAlertResponse(
+                id=str(a["id"]),
+                reservation_id=str(a["reservation_id"]) if a.get("reservation_id") else None,
+                alert_type=a["alert_type"],
+                title=a["title"],
+                detail=a.get("detail"),
+                status=a["status"],
+                created_at=str(a["created_at"]) if a.get("created_at") else None,
+            )
+            for a in alerts
+        ],
+    )
+
+
+@app.post("/api/v1/alerts/{alert_id}/dismiss")
+async def dismiss_alert_endpoint(
+    alert_id: str,
+    _auth: str = Security(verify_api_key),
+):
+    """Mark a dashboard alert as dismissed."""
+    dismissed = await dismiss_alert(alert_id)
+    if not dismissed:
+        raise HTTPException(status_code=404, detail="Alert not found or already dismissed")
+    return {"id": alert_id, "status": "dismissed"}

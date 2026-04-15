@@ -7,7 +7,7 @@ pointing to the service account JSON key file.
 from __future__ import annotations
 
 import logging
-from datetime import datetime
+from datetime import date, datetime, timedelta
 
 import httpx
 
@@ -153,3 +153,76 @@ def create_hold(title: str, date: str, start_time: str, end_time: str, descripti
     except Exception as e:
         logger.error("Google Calendar hold creation failed: %s", e)
         raise
+
+
+def get_alternative_dates(
+    calendar_id: str,
+    preferred_date: date,
+    start_time: str,
+    end_time: str,
+    num_alternatives: int = 10,
+    max_scan_days: int = 90,
+) -> list[date]:
+    """Scan forward from preferred_date to find dates where the room is free.
+
+    Only considers weekdays (Mon-Fri). Checks each candidate date for
+    conflicts in the given time window.
+
+    Args:
+        calendar_id: Google Calendar ID to check.
+        preferred_date: Starting date to scan from.
+        start_time: HH:MM start of the time window.
+        end_time: HH:MM end of the time window.
+        num_alternatives: Number of free dates to return (default 10).
+        max_scan_days: Maximum calendar days to scan forward (default 90).
+
+    Returns:
+        List of available dates, up to num_alternatives.
+    """
+    try:
+        credentials = _get_credentials()
+        from google.auth.transport.requests import Request
+        credentials.refresh(Request())
+    except Exception as e:
+        logger.error("Failed to get credentials for alternative date scan: %s", e)
+        raise
+
+    available: list[date] = []
+    current = preferred_date + timedelta(days=1)
+    scanned = 0
+
+    while len(available) < num_alternatives and scanned < max_scan_days:
+        # Skip weekends
+        if current.weekday() >= 5:
+            current += timedelta(days=1)
+            scanned += 1
+            continue
+
+        date_str = current.isoformat()
+        time_min = f"{date_str}T{start_time}:00-06:00"
+        time_max = f"{date_str}T{end_time}:00-06:00"
+
+        url = f"https://www.googleapis.com/calendar/v3/calendars/{calendar_id}/events"
+        try:
+            response = _http_with_retry(
+                "GET",
+                url,
+                params={
+                    "timeMin": time_min,
+                    "timeMax": time_max,
+                    "singleEvents": "true",
+                    "orderBy": "startTime",
+                },
+                headers={"Authorization": f"Bearer {credentials.token}"},
+            )
+            data = response.json()
+            events = data.get("items", [])
+            if len(events) == 0:
+                available.append(current)
+        except Exception:
+            logger.warning("Calendar check failed for %s, skipping", date_str)
+
+        current += timedelta(days=1)
+        scanned += 1
+
+    return available

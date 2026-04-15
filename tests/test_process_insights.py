@@ -734,7 +734,7 @@ class TestDailyDigestNode:
         result = build_daily_digest(state)
         body = result["draft_response"]
 
-        assert "QUICK STATS" in body
+        assert "BUDGET TRACKING" in body
         assert "Events this month: 8" in body
         assert "$2,500.00" in body
         assert "Pending approvals: 2" in body
@@ -757,7 +757,7 @@ class TestDailyDigestNode:
         result = build_daily_digest(state)
         body = result["draft_response"]
 
-        assert "QUICK STATS" in body
+        assert "BUDGET TRACKING" in body
         assert "Stats unavailable" in body
 
 

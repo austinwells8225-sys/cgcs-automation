@@ -34,9 +34,8 @@ class Settings(BaseSettings):
     google_calendar_id: str = "primary"
     pet_tracker_spreadsheet_id: str = ""
 
-    # --- Zoho Mail ---
-    zoho_mail_token: str = ""
-    zoho_account_id: str = ""
+    # --- Gmail (domain-wide delegation) ---
+    gmail_delegated_user: str = "admin@cgcs-acc.org"
 
     # --- Email auto-send allowlist ---
     email_auto_send_allowlist: str = "stefano.casafrancalaos@austincc.edu,marisela.perez@austincc.edu"

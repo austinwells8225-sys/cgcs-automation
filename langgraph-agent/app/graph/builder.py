@@ -8,18 +8,22 @@ from app.graph.edges import (
     after_pet_read,
     after_routing,
     after_validation,
+    after_intake_classification,
 )
 from app.graph.nodes import (
     assign_event_lead,
     build_daily_digest,
     check_auto_send,
+    classify_intake_request,
     check_calendar_availability,
     classify_email,
     create_calendar_hold,
     determine_pricing,
     draft_approval_response,
     draft_email_reply,
+    draft_intake_emails,
     draft_rejection,
+    process_email_reply,
     evaluate_eligibility,
     evaluate_room_setup,
     find_due_reminders,
@@ -77,6 +81,13 @@ def build_graph() -> StateGraph:
     # --- Daily digest node ---
     graph.add_node("build_daily_digest", build_daily_digest)
 
+    # --- Smartsheet intake nodes ---
+    graph.add_node("classify_intake_request", classify_intake_request)
+    graph.add_node("draft_intake_emails", draft_intake_emails)
+
+    # --- Email reply nodes ---
+    graph.add_node("process_email_reply", process_email_reply)
+
     # --- Shared error handler ---
     graph.add_node("handle_error", handle_error)
 
@@ -122,6 +133,13 @@ def build_graph() -> StateGraph:
 
     # --- Daily digest edges ---
     graph.add_edge("build_daily_digest", END)
+
+    # --- Smartsheet intake edges ---
+    graph.add_conditional_edges("classify_intake_request", after_intake_classification)
+    graph.add_edge("draft_intake_emails", END)
+
+    # --- Email reply edges ---
+    graph.add_edge("process_email_reply", END)
 
     # --- Error handler ---
     graph.add_edge("handle_error", END)

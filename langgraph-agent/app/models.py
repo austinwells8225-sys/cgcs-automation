@@ -498,3 +498,57 @@ class MonthlyQuickStats(BaseModel):
     revenue_this_month: float = 0.0
     pending_approvals: int = 0
     on_time_checklist_rate: float = 0.0
+
+
+# ============================================================
+# Dashboard Alerts
+# ============================================================
+
+# ============================================================
+# N8N Webhook Models
+# ============================================================
+
+class SmartsheetWebhookRequest(BaseModel):
+    subject: str
+    body: str
+    sender: str
+    date: Optional[str] = None
+
+class EmailReplyWebhookRequest(BaseModel):
+    thread_id: str
+    reply_body: str
+    sender: str
+    subject: Optional[str] = None
+    edit_loop_count: int = 0
+    failed_replies: int = 0
+    request_id: Optional[str] = None
+    smartsheet_parsed: Optional[dict] = None
+
+class AdminResponseWebhookRequest(BaseModel):
+    email_id: str
+    action: str = Field(pattern=r"^(approve|reject|edit)$")
+    edited_text: Optional[str] = None
+
+class PoliceConfirmedWebhookRequest(BaseModel):
+    reply_body: str
+    sender: str
+    request_id: Optional[str] = None
+
+
+# ============================================================
+# Dashboard Alerts
+# ============================================================
+
+class DashboardAlertResponse(BaseModel):
+    id: str
+    reservation_id: Optional[str] = None
+    alert_type: str
+    title: str
+    detail: Optional[str] = None
+    status: str = "active"
+    created_at: Optional[str] = None
+
+
+class DashboardAlertsListResponse(BaseModel):
+    count: int
+    alerts: list[DashboardAlertResponse]

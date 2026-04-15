@@ -19,6 +19,8 @@ def after_routing(state: AgentState) -> str:
         "event_lead": "assign_event_lead",
         "reminder_check": "find_due_reminders",
         "daily_digest": "build_daily_digest",
+        "smartsheet_intake": "classify_intake_request",
+        "email_reply": "process_email_reply",
     }
 
     return routes.get(task_type, "handle_error")
@@ -61,6 +63,13 @@ def after_pet_read(state: AgentState) -> str:
     if state.get("pet_operation") == "update":
         return "prepare_pet_update"
     return END
+
+
+def after_intake_classification(state: AgentState) -> str:
+    """Route after intake classification."""
+    if state.get("errors"):
+        return "handle_error"
+    return "draft_intake_emails"
 
 
 def after_lead_assignment(state: AgentState) -> str:

@@ -81,13 +81,35 @@ class AgentState(TypedDict, total=False):
     digest_pending_agreements: Optional[list[dict]]
     digest_overdue_deadlines: Optional[list[dict]]
     digest_checklist_items_due: Optional[list[dict]]
+    digest_active_alerts: Optional[list[dict]]
+    digest_edit_loop_threads: Optional[list[dict]]
     digest_monthly_stats: Optional[dict]
+    digest_intern_leads: Optional[dict]
 
     # --- Event type ---
     event_type: Optional[str]  # S-EVENT, C-EVENT, A-EVENT
 
     # --- Quote fields ---
     quote_email_snippet: Optional[str]
+
+    # --- Smartsheet intake fields ---
+    smartsheet_parsed: Optional[dict]
+    intake_classification: Optional[dict]
+    intake_difficulty: Optional[str]  # 'easy', 'mid', 'hard'
+    intake_draft_emails: Optional[list[dict]]
+
+    # --- Email reply / conversation fields ---
+    reply_body: Optional[str]
+    edit_loop_count: Optional[int]
+    failed_replies: Optional[int]
+    escalation_detected: Optional[bool]
+    escalation_reasons: Optional[list[str]]
+    escalation_forward_to: Optional[list[str]]
+    furniture_changes_detected: Optional[bool]
+    furniture_change_descriptions: Optional[list[str]]
+    reply_draft_emails: Optional[list[dict]]
+    reply_alerts: Optional[list[dict]]
+    reply_action: Optional[str]  # 'edit_loop_limit', 'escalate', 'changes_detected', 'normal_reply'
 
 
 # Backward compatibility alias

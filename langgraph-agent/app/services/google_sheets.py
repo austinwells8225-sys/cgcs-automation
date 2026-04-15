@@ -112,6 +112,54 @@ def prepare_update(row_data: dict) -> dict:
     }
 
 
+def append_row(values: list[str], spreadsheet_id: str = "", sheet_range: str = SHEET_RANGE) -> dict:
+    """Append a single row to the P.E.T. tracker spreadsheet.
+
+    Args:
+        values: List of cell values (one per column, matching PET_COLUMNS order).
+        spreadsheet_id: Override spreadsheet ID (defaults to PET_TRACKER_SPREADSHEET_ID).
+        sheet_range: Sheet range in A1 notation (default: Sheet1).
+
+    Returns:
+        {"updated_range": str, "updated_rows": int}
+    """
+    sid = spreadsheet_id or SPREADSHEET_ID
+    if not sid:
+        raise RuntimeError("PET_TRACKER_SPREADSHEET_ID not configured")
+
+    try:
+        credentials = _get_credentials()
+        from google.auth.transport.requests import Request
+        credentials.refresh(Request())
+
+        url = (
+            f"https://sheets.googleapis.com/v4/spreadsheets/{sid}"
+            f"/values/{sheet_range}:append?valueInputOption=USER_ENTERED"
+            f"&insertDataOption=INSERT_ROWS"
+        )
+
+        with httpx.Client(timeout=30) as client:
+            response = client.post(
+                url,
+                json={"values": [values]},
+                headers={
+                    "Authorization": f"Bearer {credentials.token}",
+                    "Content-Type": "application/json",
+                },
+            )
+            response.raise_for_status()
+
+        data = response.json()
+        updates = data.get("updates", {})
+        return {
+            "updated_range": updates.get("updatedRange", ""),
+            "updated_rows": updates.get("updatedRows", 0),
+        }
+    except Exception as e:
+        logger.error("Google Sheets append failed: %s", e)
+        raise
+
+
 def apply_update(spreadsheet_id: str, range_: str, values: list[list]) -> dict:
     """Apply a previously staged update to the spreadsheet.
 

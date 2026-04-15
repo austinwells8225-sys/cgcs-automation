@@ -49,7 +49,7 @@ def send_reminders(state: AgentState) -> dict:
     sent = []
     for reminder in reminders_due:
         try:
-            # In production, this sends via Zoho Mail API
+            # In production, this sends via Gmail API
             # For now, we mark them as ready to send
             sent.append({
                 **reminder,

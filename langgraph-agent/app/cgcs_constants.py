@@ -66,11 +66,7 @@ def get_labor_rate(staff_name: str) -> float:
 ADMIN_EMAIL = "austin.wells@austincc.edu"
 ADMIN_TITLE = "Strategic Planner for Community Relations & Environmental Affairs"
 
-# Current system email (Zoho) — being migrated to Google Workspace
-CGCS_ZOHO_EMAIL = "admin@cgcsacc.org"  # LEGACY — will be retired
-ZOHO_USER_ID = "879105889"              # LEGACY — will be retired
-
-# Google Workspace system email (future primary)
+# Google Workspace system email (primary)
 CGCS_SYSTEM_EMAIL = "admin@cgcs-acc.org"
 
 CGCS_WEBSITE = "https://www.cgcsacc.org"
@@ -98,6 +94,33 @@ ADASTRA_SENDER_EMAILS: set[str] = {
 }
 
 ADASTRA_SUBJECT_PATTERN = re.compile(r"Event Reservation #\d{8}-\d{5}")
+
+# ============================================================
+# Lead Time & Scheduling
+# ============================================================
+
+MINIMUM_LEAD_TIME_BD = 14  # business days
+
+POLICE_CONTACT = "james.ortiz@austincc.edu"
+
+MOVING_TEAM = ["tyler.briery@austincc.edu", "scott.farmer@austincc.edu"]
+MOVING_TEAM_CC = "michelle.raymond@austincc.edu"
+
+ESCALATION_RECIPIENTS = [
+    "michelle.raymond@austincc.edu",
+    "admin@cgcs-acc.org",
+    "austin.wells@austincc.edu",
+]
+
+INTERN_EMAILS: dict[str, str] = {
+    "Brenden Fogg": "brenden.fogg@austincc.edu",
+    "Catherine Thomason": "catherine.thomason@austincc.edu",
+    "Eimanie Thomas": "eimanie.thomas@austincc.edu",
+    "Marisela Perez Maita": "marisela.perezmaita@austincc.edu",
+    "Stefano Casafranca Laos": "stefano.casafrancalaos@austincc.edu",
+    "Tzur Shalit": "tzur.shalit@g.austincc.edu",
+    "Vanessa Trujano": "vanessa.trujano@austincc.edu",
+}
 
 # ============================================================
 # Hours of Operation
@@ -317,10 +340,61 @@ def is_adastra_email(sender: str) -> bool:
 
 
 # ============================================================
-# Step 1A — Acknowledgment Email
+# Step 1A — Acknowledgment Email (Smartsheet intake)
 # ============================================================
 
-ACKNOWLEDGMENT_EMAIL_SUBJECT = "Thank You — CGCS Event Request Received"
+INTAKE_ACK_SUBJECT_TEMPLATE = "CGCS Event Request Received \u2014 {event_name}"
+
+INTAKE_ACK_BODY_TEMPLATE = """\
+Hi {first_name},
+
+Thank you for submitting your event space request for {event_name} on {event_date}.
+
+The CGCS team will review your request and respond within 2\u20134 business days.
+
+Please note:
+- We are unable to process requests submitted fewer than 14 business days before the event date.
+- To check date availability, please visit the CGCS calendar on our website at cgcs-acc.org.
+- All future correspondence regarding this event will be through this email thread.
+
+Warm regards,
+CGCS Team
+Center for Government & Civic Service
+Austin Community College \u2014 Rio Grande Campus"""
+
+
+def build_intake_acknowledgment_email(
+    requester_name: str,
+    event_name: str,
+    event_date: str,
+) -> dict:
+    """Build the acknowledgment email for a Smartsheet intake request.
+
+    Args:
+        requester_name: Full name of the requester.
+        event_name: Name of the event.
+        event_date: Formatted date string (e.g. "June 25, 2026").
+
+    Returns:
+        {"subject": str, "body": str}
+    """
+    name = (requester_name or "").strip()
+    first_name = name.split()[0] if name else "there"
+    safe_event = event_name or "your event"
+    safe_date = event_date or "the requested date"
+
+    subject = INTAKE_ACK_SUBJECT_TEMPLATE.format(event_name=safe_event)
+    body = INTAKE_ACK_BODY_TEMPLATE.format(
+        first_name=first_name,
+        event_name=safe_event,
+        event_date=safe_date,
+    )
+
+    return {"subject": subject, "body": body}
+
+
+# Legacy acknowledgment — used by the /api/v1/acknowledge endpoint
+ACKNOWLEDGMENT_EMAIL_SUBJECT = "Thank You \u2014 CGCS Event Request Received"
 
 ACKNOWLEDGMENT_EMAIL_TEMPLATE = """\
 Hi {first_name},
@@ -334,11 +408,7 @@ CGCS Team"""
 
 
 def build_acknowledgment_email(requester_name: str) -> dict:
-    """Build the automatic acknowledgment email payload.
-
-    Extracts the first name from requester_name for personalization.
-    Falls back to a generic greeting when the name is empty.
-    """
+    """Build the legacy acknowledgment email (used by /api/v1/acknowledge)."""
     name = (requester_name or "").strip()
     first_name = name.split()[0] if name else "there"
     greeting = f"Hi {first_name}," if name else "Hi there,"
