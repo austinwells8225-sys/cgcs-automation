@@ -1,6 +1,9 @@
 services:
 
   n8n:
+    labels:
+      - "coolify.port=5678"
+      - "coolify.managed=true"
     image: n8nio/n8n:latest
     restart: unless-stopped
     environment:
@@ -31,6 +34,9 @@ services:
       - cgcs-net
 
   langgraph-agent:
+    labels:
+      - "coolify.port=8000"
+      - "coolify.managed=true"
     build:
       context: ./langgraph-agent
       dockerfile: Dockerfile
