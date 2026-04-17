@@ -1,26 +1,10 @@
 services:
-  caddy:
-    image: caddy:2-alpine
-    restart: unless-stopped
-    ports:
-      - "80:80"
-      - "443:443"
-    volumes:
-      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
-      - caddy_data:/data
-      - caddy_config:/config
-    environment:
-      - DOMAIN=${DOMAIN}
-      - ACME_EMAIL=${ACME_EMAIL}
-    depends_on:
-      - n8n
-      - langgraph-agent
-    networks:
-      - cgcs-net
 
   n8n:
     image: n8nio/n8n:latest
     restart: unless-stopped
+    ports:
+      - "5678:5678"
     environment:
       - N8N_HOST=${N8N_HOST}
       - N8N_PORT=5678
@@ -53,6 +37,8 @@ services:
       context: ./langgraph-agent
       dockerfile: Dockerfile
     restart: unless-stopped
+    ports:
+      - "8000:8000"
     environment:
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
       - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
@@ -112,8 +98,6 @@ services:
       - cgcs-net
 
 volumes:
-  caddy_data:
-  caddy_config:
   n8n_data:
   postgres_data:
 
