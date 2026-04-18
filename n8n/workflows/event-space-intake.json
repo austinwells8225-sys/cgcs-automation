@@ -18,7 +18,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// Normalize and validate intake form fields\nconst input = $input.first().json.body || $input.first().json;\nconst crypto = require('crypto');\nconst hash = crypto.createHash('sha256')\n  .update(`${input.requester_email}-${input.requested_date}-${Date.now()}`)\n  .digest('hex')\n  .substring(0, 16);\n\nreturn [{\n  json: {\n    request_id: `form-${hash}`,\n    requester_name: (input.requester_name || '').trim(),\n    requester_email: (input.requester_email || '').trim().toLowerCase(),\n    requester_organization: (input.requester_organization || '').trim() || null,\n    event_name: (input.event_name || '').trim(),\n    event_description: (input.event_description || '').trim() || null,\n    requested_date: input.requested_date,\n    requested_start_time: input.requested_start_time,\n    requested_end_time: input.requested_end_time,\n    room_requested: (input.room_requested || '').trim() || null,\n    estimated_attendees: parseInt(input.estimated_attendees) || null,\n    setup_requirements_raw: (input.setup_requirements || '').trim() || null\n  }\n}];"
+        "jsCode": "// Normalize and validate intake form fields. Handles both direct POST body\n// and n8n webhook payload wrapper ({ body: {...} }) shapes.\nconst raw = $input.first().json;\nconst input = raw.body || raw;\nconst crypto = require('crypto');\n\nconst hash = crypto.createHash('sha256')\n  .update(`${input.requester_email}-${input.requested_date}-${Date.now()}`)\n  .digest('hex')\n  .substring(0, 16);\n\nreturn [{\n  json: {\n    request_id: `form-${hash}`,\n    requester_name: (input.requester_name || '').trim(),\n    requester_email: (input.requester_email || '').trim().toLowerCase(),\n    requester_organization: (input.requester_organization || '').trim() || null,\n    event_name: (input.event_name || '').trim(),\n    event_description: (input.event_description || '').trim() || null,\n    requested_date: input.requested_date,\n    requested_start_time: input.requested_start_time,\n    requested_end_time: input.requested_end_time,\n    room_requested: (input.room_requested || '').trim() || null,\n    estimated_attendees: parseInt(input.estimated_attendees) || null,\n    setup_requirements_raw: (input.setup_requirements || '').trim() || null\n  }\n}];"
       },
       "id": "validate-transform",
       "name": "Validate & Transform",
@@ -28,37 +28,35 @@
     },
     {
       "parameters": {
-        "resource": "event",
-        "operation": "getAll",
-        "calendar": {
-          "__rl": true,
-          "mode": "id",
-          "value": "c_53b8b5f99d7372ea0c513c9fe379461d8fd9c628d883b5b752a95eb5afbe3182@group.calendar.google.com"
+        "method": "POST",
+        "url": "http://langgraph-agent:8000/api/v1/calendar/check",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({date: $json.requested_date, start_time: $json.requested_start_time, end_time: $json.requested_end_time}) }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {"name": "Content-Type", "value": "application/json"},
+            {"name": "X-Webhook-Secret", "value": "={{ $env.WEBHOOK_SECRET }}"}
+          ]
         },
-        "timeMin": "={{ $json.requested_date }}T{{ $json.requested_start_time }}:00",
-        "timeMax": "={{ $json.requested_date }}T{{ $json.requested_end_time }}:00",
         "options": {
-          "singleEvents": true
+          "timeout": 30000,
+          "response": {"response": {"neverError": false, "fullResponse": false}}
         }
       },
-      "id": "check-calendar",
-      "name": "Check Calendar Availability",
-      "type": "n8n-nodes-base.googleCalendar",
-      "typeVersion": 1.2,
-      "position": [680, 300],
-      "credentials": {
-        "googleCalendarOAuth2Api": {
-          "id": "CONFIGURE_IN_N8N",
-          "name": "CGCS Admin Calendar"
-        }
-      }
+      "id": "calendar-check",
+      "name": "Agent - Check Calendar",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [680, 300]
     },
     {
       "parameters": {
-        "jsCode": "// Determine calendar availability based on returned events\nconst events = $input.all();\nconst formData = $('Validate & Transform').first().json;\nconst realEvents = events.filter(e => e.json && e.json.id);\nconst calendar_available = realEvents.length === 0;\n\nreturn [{\n  json: {\n    ...formData,\n    calendar_available: calendar_available,\n    conflicting_events_count: realEvents.length\n  }\n}];"
+        "jsCode": "// Combine calendar check result with form data for the evaluate call.\nconst agentCalendarResponse = $input.first().json;\nconst formData = $('Validate & Transform').first().json;\n\nconst is_available = agentCalendarResponse.is_available === true;\nconst conflicting_events = Array.isArray(agentCalendarResponse.events) ? agentCalendarResponse.events : [];\n\nreturn [{\n  json: {\n    ...formData,\n    calendar_available: is_available,\n    conflicting_events: conflicting_events,\n    conflicting_events_count: conflicting_events.length\n  }\n}];"
       },
-      "id": "check-availability-result",
-      "name": "Calendar Availability Result",
+      "id": "merge-calendar-result",
+      "name": "Merge Calendar Result",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [900, 300]
@@ -73,24 +71,13 @@
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
-            {
-              "name": "Content-Type",
-              "value": "application/json"
-            },
-            {
-              "name": "X-Webhook-Secret",
-              "value": "={{ $env.WEBHOOK_SECRET }}"
-            }
+            {"name": "Content-Type", "value": "application/json"},
+            {"name": "X-Webhook-Secret", "value": "={{ $env.WEBHOOK_SECRET }}"}
           ]
         },
         "options": {
           "timeout": 60000,
-          "response": {
-            "response": {
-              "neverError": false,
-              "fullResponse": false
-            }
-          }
+          "response": {"response": {"neverError": false, "fullResponse": false}}
         }
       },
       "id": "call-agent-evaluate",
@@ -101,7 +88,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// Merge agent response with original form data for downstream steps\nconst agentResult = $input.first().json;\nconst formData = $('Validate & Transform').first().json;\nconst calendarData = $('Calendar Availability Result').first().json;\n\nreturn [{\n  json: {\n    request_id: agentResult.request_id || formData.request_id,\n    decision: agentResult.decision,\n    is_eligible: agentResult.is_eligible,\n    eligibility_reason: agentResult.eligibility_reason,\n    pricing_tier: agentResult.pricing_tier,\n    estimated_cost: agentResult.estimated_cost,\n    room_assignment: agentResult.room_assignment,\n    setup_config: agentResult.setup_config,\n    draft_response: agentResult.draft_response,\n    errors: agentResult.errors || [],\n    calendar_available: calendarData.calendar_available,\n    conflicting_events_count: calendarData.conflicting_events_count || 0,\n    _form: formData\n  }\n}];"
+        "jsCode": "// Merge agent evaluation response with original form and calendar data\n// so downstream notification has full context.\nconst agentResult = $input.first().json;\nconst formData = $('Validate & Transform').first().json;\nconst calendarData = $('Merge Calendar Result').first().json;\n\nreturn [{\n  json: {\n    request_id: agentResult.request_id || formData.request_id,\n    decision: agentResult.decision,\n    is_eligible: agentResult.is_eligible,\n    eligibility_reason: agentResult.eligibility_reason,\n    pricing_tier: agentResult.pricing_tier,\n    estimated_cost: agentResult.estimated_cost,\n    room_assignment: agentResult.room_assignment,\n    setup_config: agentResult.setup_config,\n    draft_response: agentResult.draft_response,\n    errors: agentResult.errors || [],\n    calendar_available: calendarData.calendar_available,\n    conflicting_events_count: calendarData.conflicting_events_count || 0,\n    _form: formData\n  }\n}];"
       },
       "id": "merge-results",
       "name": "Merge Agent + Form Data",
@@ -119,24 +106,13 @@
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
-            {
-              "name": "Content-Type",
-              "value": "application/json"
-            },
-            {
-              "name": "X-Webhook-Secret",
-              "value": "={{ $env.WEBHOOK_SECRET }}"
-            }
+            {"name": "Content-Type", "value": "application/json"},
+            {"name": "X-Webhook-Secret", "value": "={{ $env.WEBHOOK_SECRET }}"}
           ]
         },
         "options": {
           "timeout": 30000,
-          "response": {
-            "response": {
-              "neverError": true,
-              "fullResponse": false
-            }
-          }
+          "response": {"response": {"neverError": true, "fullResponse": false}}
         }
       },
       "id": "trigger-admin-notification",
@@ -152,12 +128,7 @@
         "options": {
           "responseCode": 200,
           "responseHeaders": {
-            "entries": [
-              {
-                "name": "Content-Type",
-                "value": "application/json"
-              }
-            ]
+            "entries": [{"name": "Content-Type", "value": "application/json"}]
           }
         }
       },
@@ -170,81 +141,25 @@
   ],
   "connections": {
     "Webhook - Intake Form": {
-      "main": [
-        [
-          {
-            "node": "Validate & Transform",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
+      "main": [[{"node": "Validate & Transform", "type": "main", "index": 0}]]
     },
     "Validate & Transform": {
-      "main": [
-        [
-          {
-            "node": "Check Calendar Availability",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
+      "main": [[{"node": "Agent - Check Calendar", "type": "main", "index": 0}]]
     },
-    "Check Calendar Availability": {
-      "main": [
-        [
-          {
-            "node": "Calendar Availability Result",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
+    "Agent - Check Calendar": {
+      "main": [[{"node": "Merge Calendar Result", "type": "main", "index": 0}]]
     },
-    "Calendar Availability Result": {
-      "main": [
-        [
-          {
-            "node": "Agent - Evaluate Request",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
+    "Merge Calendar Result": {
+      "main": [[{"node": "Agent - Evaluate Request", "type": "main", "index": 0}]]
     },
     "Agent - Evaluate Request": {
-      "main": [
-        [
-          {
-            "node": "Merge Agent + Form Data",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
+      "main": [[{"node": "Merge Agent + Form Data", "type": "main", "index": 0}]]
     },
     "Merge Agent + Form Data": {
-      "main": [
-        [
-          {
-            "node": "Agent - Queue Admin Notification",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
+      "main": [[{"node": "Agent - Queue Admin Notification", "type": "main", "index": 0}]]
     },
     "Agent - Queue Admin Notification": {
-      "main": [
-        [
-          {
-            "node": "Respond to Webhook",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
+      "main": [[{"node": "Respond to Webhook", "type": "main", "index": 0}]]
     }
   },
   "settings": {
@@ -252,14 +167,8 @@
   },
   "staticData": null,
   "tags": [
-    {
-      "name": "CGCS",
-      "id": "1"
-    },
-    {
-      "name": "Intake",
-      "id": "2"
-    }
+    {"name": "CGCS", "id": "1"},
+    {"name": "Intake", "id": "2"}
   ],
   "triggerCount": 1,
   "pinData": {}
