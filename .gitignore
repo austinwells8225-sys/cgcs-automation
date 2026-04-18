@@ -39,3 +39,5 @@ htmlcov/
 
 # Claude
 .claude/
+credentials/
+docker-compose.yml.backup
