@@ -6,6 +6,7 @@
         "httpMethod": "POST",
         "path": "intake/event-space",
         "authentication": "headerAuth",
+        "responseMode": "responseNode",
         "options": {}
       },
       "id": "webhook-trigger",
@@ -17,7 +18,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// Normalize and validate form fields\nconst input = $input.first().json;\n\n// Generate idempotent request_id from email + date + timestamp\nconst crypto = require('crypto');\nconst hash = crypto.createHash('sha256')\n  .update(`${input.requester_email}-${input.requested_date}-${Date.now()}`)\n  .digest('hex')\n  .substring(0, 16);\n\nreturn [{\n  json: {\n    task_type: 'event_intake',\n    request_id: `form-${hash}`,\n    requester_name: (input.requester_name || '').trim(),\n    requester_email: (input.requester_email || '').trim().toLowerCase(),\n    requester_organization: (input.requester_organization || '').trim() || null,\n    event_name: (input.event_name || '').trim(),\n    event_description: (input.event_description || '').trim() || null,\n    requested_date: input.requested_date,\n    requested_start_time: input.requested_start_time,\n    requested_end_time: input.requested_end_time,\n    room_requested: (input.room_requested || '').trim() || null,\n    estimated_attendees: parseInt(input.estimated_attendees) || null,\n    setup_requirements_raw: (input.setup_requirements || '').trim() || null\n  }\n}];"
+        "jsCode": "// Normalize and validate intake form fields\nconst input = $input.first().json.body || $input.first().json;\nconst crypto = require('crypto');\nconst hash = crypto.createHash('sha256')\n  .update(`${input.requester_email}-${input.requested_date}-${Date.now()}`)\n  .digest('hex')\n  .substring(0, 16);\n\nreturn [{\n  json: {\n    request_id: `form-${hash}`,\n    requester_name: (input.requester_name || '').trim(),\n    requester_email: (input.requester_email || '').trim().toLowerCase(),\n    requester_organization: (input.requester_organization || '').trim() || null,\n    event_name: (input.event_name || '').trim(),\n    event_description: (input.event_description || '').trim() || null,\n    requested_date: input.requested_date,\n    requested_start_time: input.requested_start_time,\n    requested_end_time: input.requested_end_time,\n    room_requested: (input.room_requested || '').trim() || null,\n    estimated_attendees: parseInt(input.estimated_attendees) || null,\n    setup_requirements_raw: (input.setup_requirements || '').trim() || null\n  }\n}];"
       },
       "id": "validate-transform",
       "name": "Validate & Transform",
@@ -31,65 +32,51 @@
         "operation": "getAll",
         "calendar": {
           "__rl": true,
-          "mode": "list",
-          "value": "={{ $json.room_calendar_id }}"
+          "mode": "id",
+          "value": "c_53b8b5f99d7372ea0c513c9fe379461d8fd9c628d883b5b752a95eb5afbe3182@group.calendar.google.com"
         },
         "timeMin": "={{ $json.requested_date }}T{{ $json.requested_start_time }}:00",
         "timeMax": "={{ $json.requested_date }}T{{ $json.requested_end_time }}:00",
-        "options": {}
+        "options": {
+          "singleEvents": true
+        }
       },
       "id": "check-calendar",
-      "name": "Google Calendar - Check Availability",
+      "name": "Check Calendar Availability",
       "type": "n8n-nodes-base.googleCalendar",
       "typeVersion": 1.2,
       "position": [680, 300],
       "credentials": {
         "googleCalendarOAuth2Api": {
           "id": "CONFIGURE_IN_N8N",
-          "name": "Google Calendar"
+          "name": "CGCS Admin Calendar"
         }
       }
     },
     {
       "parameters": {
-        "jsCode": "// Determine calendar availability based on returned events\nconst events = $input.all();\nconst formData = $('Validate & Transform').first().json;\n\n// If no events found, the time slot is available\nconst calendar_available = events.length === 0 || (events.length === 1 && !events[0].json.id);\n\nreturn [{\n  json: {\n    ...formData,\n    calendar_available: calendar_available\n  }\n}];"
+        "jsCode": "// Determine calendar availability based on returned events\nconst events = $input.all();\nconst formData = $('Validate & Transform').first().json;\nconst realEvents = events.filter(e => e.json && e.json.id);\nconst calendar_available = realEvents.length === 0;\n\nreturn [{\n  json: {\n    ...formData,\n    calendar_available: calendar_available,\n    conflicting_events_count: realEvents.length\n  }\n}];"
       },
       "id": "check-availability-result",
-      "name": "Check Availability Result",
+      "name": "Calendar Availability Result",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [900, 300]
     },
     {
       "parameters": {
-        "conditions": {
-          "boolean": [
-            {
-              "value1": "={{ $json.calendar_available }}",
-              "value2": true
-            }
-          ]
-        }
-      },
-      "id": "if-available",
-      "name": "IF Calendar Available",
-      "type": "n8n-nodes-base.if",
-      "typeVersion": 2,
-      "position": [1120, 300]
-    },
-    {
-      "parameters": {
         "method": "POST",
         "url": "http://langgraph-agent:8000/api/v1/evaluate",
         "sendBody": true,
-        "bodyParameters": {
-          "parameters": []
-        },
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify($json) }}",
+        "jsonBody": "={{ JSON.stringify({request_id: $json.request_id, requester_name: $json.requester_name, requester_email: $json.requester_email, requester_organization: $json.requester_organization, event_name: $json.event_name, event_description: $json.event_description, requested_date: $json.requested_date, requested_start_time: $json.requested_start_time, requested_end_time: $json.requested_end_time, room_requested: $json.room_requested, estimated_attendees: $json.estimated_attendees, setup_requirements_raw: $json.setup_requirements_raw, calendar_available: $json.calendar_available}) }}",
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
             {
               "name": "X-Webhook-Secret",
               "value": "={{ $env.WEBHOOK_SECRET }}"
@@ -97,68 +84,88 @@
           ]
         },
         "options": {
-          "timeout": 60000
+          "timeout": 60000,
+          "response": {
+            "response": {
+              "neverError": false,
+              "fullResponse": false
+            }
+          }
         }
       },
-      "id": "call-agent",
-      "name": "Call LangGraph Agent",
+      "id": "call-agent-evaluate",
+      "name": "Agent - Evaluate Request",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [1340, 200]
+      "position": [1120, 300]
     },
     {
       "parameters": {
-        "jsCode": "// Generate calendar conflict response\nconst formData = $('Validate & Transform').first().json;\n\nreturn [{\n  json: {\n    ...formData,\n    decision: 'calendar_conflict',\n    is_eligible: null,\n    eligibility_reason: null,\n    pricing_tier: null,\n    estimated_cost: null,\n    room_assignment: formData.room_requested,\n    setup_config: null,\n    draft_response: `Dear ${formData.requester_name},\\n\\nThank you for your interest in reserving event space at the Center for Government & Civic Service.\\n\\nUnfortunately, the ${formData.room_requested || 'requested room'} is not available on ${formData.requested_date} from ${formData.requested_start_time} to ${formData.requested_end_time}. The time slot you selected conflicts with an existing reservation.\\n\\nWe would be happy to help you find an alternative date or time. Please visit our calendar to view current availability, or reply to this email with your preferred alternatives.\\n\\nBest regards,\\nCGCS Event Space Team\\nAustin Community College`,\n    errors: []\n  }\n}];"
-      },
-      "id": "conflict-response",
-      "name": "Draft Conflict Response",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [1340, 420]
-    },
-    {
-      "parameters": {
-        "jsCode": "// Merge agent response with form data for DB insert\nconst agentResult = $input.first().json;\nconst formData = $('Validate & Transform').first().json;\n\nreturn [{\n  json: {\n    request_id: formData.request_id,\n    requester_name: formData.requester_name,\n    requester_email: formData.requester_email,\n    requester_organization: formData.requester_organization,\n    event_name: formData.event_name,\n    decision: agentResult.decision,\n    is_eligible: agentResult.is_eligible,\n    eligibility_reason: agentResult.eligibility_reason,\n    pricing_tier: agentResult.pricing_tier,\n    estimated_cost: agentResult.estimated_cost,\n    room_assignment: agentResult.room_assignment,\n    draft_response: agentResult.draft_response,\n    calendar_available: formData.calendar_available\n  }\n}];"
+        "jsCode": "// Merge agent response with original form data for downstream steps\nconst agentResult = $input.first().json;\nconst formData = $('Validate & Transform').first().json;\nconst calendarData = $('Calendar Availability Result').first().json;\n\nreturn [{\n  json: {\n    request_id: agentResult.request_id || formData.request_id,\n    decision: agentResult.decision,\n    is_eligible: agentResult.is_eligible,\n    eligibility_reason: agentResult.eligibility_reason,\n    pricing_tier: agentResult.pricing_tier,\n    estimated_cost: agentResult.estimated_cost,\n    room_assignment: agentResult.room_assignment,\n    setup_config: agentResult.setup_config,\n    draft_response: agentResult.draft_response,\n    errors: agentResult.errors || [],\n    calendar_available: calendarData.calendar_available,\n    conflicting_events_count: calendarData.conflicting_events_count || 0,\n    _form: formData\n  }\n}];"
       },
       "id": "merge-results",
-      "name": "Merge Results",
+      "name": "Merge Agent + Form Data",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
+      "position": [1340, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://langgraph-agent:8000/api/v1/email/triage",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({request_id: $json.request_id, email_type: 'admin_review_notification', recipient: $env.ADMIN_EMAIL, subject_prefix: '[CGCS Intake]', context: {decision: $json.decision, event_name: $json._form.event_name, requester_name: $json._form.requester_name, requester_email: $json._form.requester_email, requester_organization: $json._form.requester_organization, requested_date: $json._form.requested_date, requested_start_time: $json._form.requested_start_time, requested_end_time: $json._form.requested_end_time, room_requested: $json._form.room_requested, estimated_attendees: $json._form.estimated_attendees, is_eligible: $json.is_eligible, eligibility_reason: $json.eligibility_reason, pricing_tier: $json.pricing_tier, estimated_cost: $json.estimated_cost, room_assignment: $json.room_assignment, draft_response: $json.draft_response, calendar_available: $json.calendar_available, conflicting_events_count: $json.conflicting_events_count}}) }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "X-Webhook-Secret",
+              "value": "={{ $env.WEBHOOK_SECRET }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "neverError": true,
+              "fullResponse": false
+            }
+          }
+        }
+      },
+      "id": "trigger-admin-notification",
+      "name": "Agent - Queue Admin Notification",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
       "position": [1560, 300]
     },
     {
       "parameters": {
-        "fromEmail": "events@cgcs.austincc.edu",
-        "toEmail": "={{ $env.ADMIN_EMAIL }}",
-        "subject": "=🔔 New Event Space Request: {{ $json.event_name }} ({{ $json.decision }})",
-        "emailType": "html",
-        "html": "=<h2>New Event Space Reservation Request</h2>\n<p><strong>Status:</strong> Pending Your Review</p>\n<hr>\n<h3>Request Details</h3>\n<ul>\n  <li><strong>Request ID:</strong> {{ $json.request_id }}</li>\n  <li><strong>Requester:</strong> {{ $json.requester_name }} ({{ $json.requester_email }})</li>\n  <li><strong>Organization:</strong> {{ $json.requester_organization || 'Not specified' }}</li>\n  <li><strong>Event:</strong> {{ $json.event_name }}</li>\n  <li><strong>Calendar Available:</strong> {{ $json.calendar_available ? 'Yes' : 'No' }}</li>\n</ul>\n<h3>AI Evaluation</h3>\n<ul>\n  <li><strong>Decision:</strong> {{ $json.decision }}</li>\n  <li><strong>Eligible:</strong> {{ $json.is_eligible }}</li>\n  <li><strong>Reason:</strong> {{ $json.eligibility_reason || 'N/A' }}</li>\n  <li><strong>Pricing Tier:</strong> {{ $json.pricing_tier || 'N/A' }}</li>\n  <li><strong>Estimated Cost:</strong> ${{ $json.estimated_cost || '0.00' }}</li>\n  <li><strong>Room:</strong> {{ $json.room_assignment || 'Not assigned' }}</li>\n</ul>\n<h3>AI Draft Response (for your review)</h3>\n<blockquote style=\"background:#f9f9f9; padding:15px; border-left:4px solid #ccc;\">\n  <pre>{{ $json.draft_response }}</pre>\n</blockquote>\n<hr>\n<p><strong>⚠️ No email has been sent to the requester.</strong></p>\n<p>To approve or reject this request, use the admin approval workflow:</p>\n<p>\n  <a href=\"{{ $env.WEBHOOK_URL }}/webhook/intake/approve?request_id={{ $json.request_id }}&action=approve\" style=\"background:#28a745; color:white; padding:10px 20px; text-decoration:none; border-radius:5px; margin-right:10px;\">✅ Approve</a>\n  <a href=\"{{ $env.WEBHOOK_URL }}/webhook/intake/approve?request_id={{ $json.request_id }}&action=reject\" style=\"background:#dc3545; color:white; padding:10px 20px; text-decoration:none; border-radius:5px;\">❌ Reject</a>\n</p>",
-        "options": {}
-      },
-      "id": "notify-admin",
-      "name": "Email Admin - Review Required",
-      "type": "n8n-nodes-base.emailSend",
-      "typeVersion": 2.1,
-      "position": [1780, 300],
-      "credentials": {
-        "smtp": {
-          "id": "CONFIGURE_IN_N8N",
-          "name": "Zoho SMTP"
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({status: 'received', request_id: $('Merge Agent + Form Data').first().json.request_id, message: 'Thank you for your event space request. It has been received and is being reviewed by the CGCS team. You will receive a response within one business day.'}) }}",
+        "options": {
+          "responseCode": 200,
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              }
+            ]
+          }
         }
-      }
-    },
-    {
-      "parameters": {
-        "assignments": {
-          "assignments": []
-        },
-        "options": {}
       },
-      "id": "error-handler",
-      "name": "Error Handler",
-      "type": "n8n-nodes-base.set",
-      "typeVersion": 3.4,
-      "position": [1340, 560]
+      "id": "respond-webhook",
+      "name": "Respond to Webhook",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [1780, 300]
     }
   ],
   "connections": {
@@ -177,80 +184,62 @@
       "main": [
         [
           {
-            "node": "Google Calendar - Check Availability",
+            "node": "Check Calendar Availability",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Google Calendar - Check Availability": {
+    "Check Calendar Availability": {
       "main": [
         [
           {
-            "node": "Check Availability Result",
+            "node": "Calendar Availability Result",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Check Availability Result": {
+    "Calendar Availability Result": {
       "main": [
         [
           {
-            "node": "IF Calendar Available",
+            "node": "Agent - Evaluate Request",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "IF Calendar Available": {
+    "Agent - Evaluate Request": {
       "main": [
         [
           {
-            "node": "Call LangGraph Agent",
-            "type": "main",
-            "index": 0
-          }
-        ],
-        [
-          {
-            "node": "Draft Conflict Response",
+            "node": "Merge Agent + Form Data",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Call LangGraph Agent": {
+    "Merge Agent + Form Data": {
       "main": [
         [
           {
-            "node": "Merge Results",
+            "node": "Agent - Queue Admin Notification",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Draft Conflict Response": {
+    "Agent - Queue Admin Notification": {
       "main": [
         [
           {
-            "node": "Merge Results",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Merge Results": {
-      "main": [
-        [
-          {
-            "node": "Email Admin - Review Required",
+            "node": "Respond to Webhook",
             "type": "main",
             "index": 0
           }
