@@ -310,3 +310,100 @@ async def reply_to_thread(
         }
 
     return await asyncio.to_thread(_reply)
+
+
+async def create_draft(
+    to: str,
+    subject: str,
+    body: str,
+    cc: str | None = None,
+    bcc: str | None = None,
+    attachments: list[dict] | None = None,
+) -> dict:
+    """Create a Gmail draft (NOT sent) in admin@cgcs-acc.org's Drafts folder.
+
+    Use this for AI-generated replies that need human review before sending.
+    Austin opens Gmail, sees the draft, edits, hits Send.
+
+    Returns:
+        {"draft_id": str, "message_id": str, "thread_id": str}
+    """
+    def _create():
+        service = _get_gmail_service()
+        message = _build_mime_message(to, subject, body, cc=cc, bcc=bcc, attachments=attachments)
+        raw = base64.urlsafe_b64encode(message.as_bytes()).decode("ascii")
+        result = _retry_transient(
+            service.users().drafts().create(
+                userId="me",
+                body={"message": {"raw": raw}},
+            ).execute,
+        )
+        msg = result.get("message", {}) or {}
+        return {
+            "draft_id": result.get("id", ""),
+            "message_id": msg.get("id", ""),
+            "thread_id": msg.get("threadId", ""),
+        }
+
+    return await asyncio.to_thread(_create)
+
+
+async def create_draft_reply(
+    thread_id: str,
+    to: str,
+    subject: str,
+    body: str,
+    cc: str | None = None,
+) -> dict:
+    """Create a Gmail draft threaded as a reply to an existing message.
+
+    The draft will appear in the original email's thread, so when Austin
+    opens Gmail he sees it attached to the original Smartsheet notification
+    (not floating in the Drafts folder as a standalone).
+
+    Returns:
+        {"draft_id": str, "message_id": str, "thread_id": str}
+    """
+    def _create():
+        service = _get_gmail_service()
+
+        # Look up the Message-Id of the last message in the thread so we can
+        # set In-Reply-To / References headers correctly.
+        thread = _retry_transient(
+            service.users().threads().get(
+                userId="me", id=thread_id, format="metadata",
+                metadataHeaders=["Message-Id"],
+            ).execute,
+        )
+        original_message_id = ""
+        if thread.get("messages"):
+            last_msg = thread["messages"][-1]
+            original_message_id = _extract_header(
+                last_msg.get("payload", {}).get("headers", []),
+                "Message-Id",
+            )
+
+        message = _build_mime_message(
+            to, subject, body, cc=cc,
+            in_reply_to=original_message_id,
+        )
+        raw = base64.urlsafe_b64encode(message.as_bytes()).decode("ascii")
+        result = _retry_transient(
+            service.users().drafts().create(
+                userId="me",
+                body={
+                    "message": {
+                        "raw": raw,
+                        "threadId": thread_id,
+                    }
+                },
+            ).execute,
+        )
+        msg = result.get("message", {}) or {}
+        return {
+            "draft_id": result.get("id", ""),
+            "message_id": msg.get("id", ""),
+            "thread_id": msg.get("threadId", ""),
+        }
+
+    return await asyncio.to_thread(_create)

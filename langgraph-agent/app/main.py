@@ -64,6 +64,8 @@ from app.db.alert_queries import (
     get_active_alerts,
 )
 from app.services.smartsheet_parser import is_smartsheet_intake, parse_smartsheet_intake
+from app.services.scheduler import start_scheduler, shutdown_scheduler, get_scheduler
+from app.services.smartsheet_inbox_poller import poll_smartsheet_inbox
 from app.services.date_utils import business_days_until, is_within_minimum_lead_time
 from app.services.intake_classifier import classify_request
 from app.services.error_handler import classify_error, build_error_alert
@@ -166,7 +168,10 @@ def _run_config(task_type: str, request_id: str) -> dict:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("CGCS LangGraph Agent starting up")
+    start_scheduler(compiled_graph)
     yield
+    logger.info("Shutting down: stopping scheduler")
+    shutdown_scheduler()
     logger.info("Shutting down, closing DB pool")
     await close_pool()
 
@@ -1771,3 +1776,53 @@ async def dismiss_alert_endpoint(
     if not dismissed:
         raise HTTPException(status_code=404, detail="Alert not found or already dismissed")
     return {"id": alert_id, "status": "dismissed"}
+
+
+# ============================================================
+# Smartsheet inbox polling — manual trigger + status
+# ============================================================
+
+@app.post("/api/v1/smartsheet/poll-now")
+async def smartsheet_poll_now(
+    _auth: str = Security(verify_api_key),
+):
+    """Manually trigger one Smartsheet inbox poll cycle.
+
+    Useful for testing without waiting for the scheduled interval.
+    Authenticated — requires LANGGRAPH_API_KEY bearer token.
+    """
+    try:
+        results = await poll_smartsheet_inbox(
+            compiled_graph=compiled_graph,
+            max_emails=10,
+        )
+        return {
+            "status": "ok",
+            "checked": results.get("checked", 0),
+            "processed": results.get("processed", 0),
+            "skipped": results.get("skipped", 0),
+            "errors": results.get("errors", []),
+        }
+    except Exception as e:
+        logger.exception("Manual Smartsheet poll failed")
+        raise HTTPException(status_code=500, detail=f"Poll failed: {e}")
+
+
+@app.get("/api/v1/smartsheet/scheduler-status")
+async def smartsheet_scheduler_status(
+    _auth: str = Security(verify_api_key),
+):
+    """Report which scheduled jobs are registered and when they next run."""
+    scheduler = get_scheduler()
+    if scheduler is None:
+        return {"running": False, "jobs": []}
+
+    jobs = []
+    for job in scheduler.get_jobs():
+        jobs.append({
+            "id": job.id,
+            "name": job.name,
+            "next_run_time": str(job.next_run_time) if job.next_run_time else None,
+            "trigger": str(job.trigger),
+        })
+    return {"running": True, "jobs": jobs}
