@@ -8,6 +8,7 @@ logger = logging.getLogger(__name__)
 
 VALID_TASK_TYPES = {
     "event_intake",
+    "smartsheet_intake",
     "email_triage",
     "calendar_check",
     "calendar_hold",
