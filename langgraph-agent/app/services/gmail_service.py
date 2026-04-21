@@ -20,7 +20,12 @@ from app.config import settings
 
 logger = logging.getLogger(__name__)
 
-SCOPES = ["https://mail.google.com/"]
+SCOPES = [
+    "https://www.googleapis.com/auth/gmail.readonly",
+    "https://www.googleapis.com/auth/gmail.modify",
+    "https://www.googleapis.com/auth/gmail.compose",
+    "https://www.googleapis.com/auth/gmail.send",
+]
 
 
 def _get_credentials():
