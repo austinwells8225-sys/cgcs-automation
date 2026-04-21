@@ -247,29 +247,33 @@ def _draft_easy_response(
 
     deadlines_text = "\n".join(deadline_lines) if deadline_lines else "- Deadlines will be provided once your date is confirmed."
 
+    room_line = f" in {room}" if room else ""
     return (
         f"Hi {first_name},\n"
         f"\n"
-        f"Thank you for your event space request for {event_name}.\n"
+        f"Thank you for your event space request for {event_name} on "
+        f"{event_date_str} from {start_time} \u2013 {end_time}{room_line}.\n"
         f"\n"
-        f"We're pleased to confirm that {event_date_str} is available. "
-        f"A tentative hold has been placed on the CGCS calendar for "
-        f"{start_time} \u2013 {end_time} in {room or 'the requested room'}.\n"
+        f"We are reviewing availability and will confirm your reservation "
+        f"shortly. Once confirmed, you will receive the attached User Agreement "
+        f"to review and sign.\n"
         f"\n"
         f"Key deadlines for your event:\n"
         f"{deadlines_text}\n"
         f"\n"
-        f"Next steps:\n"
-        f"- Please review and sign the attached User Agreement.\n"
-        f"- Parking information is available on our website at cgcs-acc.org.\n"
-        f"- All future correspondence regarding this event will be through this email thread.\n"
+        f"Please note:\n"
+        f"- All future correspondence regarding this event will be through this "
+        f"email thread.\n"
+        f"- Parking information will be provided once your reservation is "
+        f"confirmed.\n"
         f"\n"
-        f"If you have any questions, please don't hesitate to reply to this email.\n"
+        f"If you have any questions, please reply to this email.\n"
         f"\n"
         f"Warm regards,\n"
         f"CGCS Team\n"
         f"Center for Government & Civic Service\n"
-        f"Austin Community College \u2014 Rio Grande Campus"
+        f"Austin Community College \u2014 Rio Grande Campus\n"
+        f"admin@cgcs-acc.org | www.cgcsacc.org"
     )
 
 
@@ -283,33 +287,43 @@ def _draft_review_response(
     classification: dict,
 ) -> str:
     """Draft the response for mid/hard requests (goes to approval queue)."""
-    flags_text = ""
-    if classification.get("flags"):
-        flags_text = "\n\nItems requiring attention:\n" + "\n".join(
-            f"- {f}" for f in classification["flags"]
+    flags = classification.get("flags") or []
+    difficulty = classification.get("difficulty", "mid")
+
+    coordination_lines = ""
+    if flags:
+        coordination_lines = (
+            "\nBecause of the specifics of your request, our team is "
+            "coordinating a few additional details before confirming:\n"
+            + "\n".join(f"- {f}" for f in flags)
+            + "\n"
         )
 
+    room_line = f" in {room}" if room else ""
     return (
         f"Hi {first_name},\n"
         f"\n"
-        f"Thank you for your event space request for {event_name} "
-        f"on {event_date_str} ({start_time} \u2013 {end_time}).\n"
+        f"Thank you for your event space request for {event_name} on "
+        f"{event_date_str} from {start_time} \u2013 {end_time}{room_line}.\n"
         f"\n"
-        f"We have received your request and a tentative hold has been placed on "
-        f"the CGCS calendar in {room or 'the requested room'}. "
-        f"Our team is reviewing the details and will follow up within "
-        f"2\u20134 business days with next steps.\n"
+        f"We have received your request and our team is reviewing the details. "
+        f"You will hear back from us within 2\u20134 business days with next "
+        f"steps.\n"
+        f"{coordination_lines}"
         f"\n"
         f"Please note:\n"
-        f"- All future correspondence regarding this event will be through this email thread.\n"
-        f"- To check date availability, please visit the CGCS calendar at cgcs-acc.org.\n"
+        f"- All future correspondence regarding this event will be through this "
+        f"email thread.\n"
+        f"- Once your reservation is confirmed, you will receive the attached "
+        f"User Agreement along with parking information.\n"
         f"\n"
         f"If you have any questions in the meantime, please reply to this email.\n"
         f"\n"
         f"Warm regards,\n"
         f"CGCS Team\n"
         f"Center for Government & Civic Service\n"
-        f"Austin Community College \u2014 Rio Grande Campus"
+        f"Austin Community College \u2014 Rio Grande Campus\n"
+        f"admin@cgcs-acc.org | www.cgcsacc.org"
     )
 
 
