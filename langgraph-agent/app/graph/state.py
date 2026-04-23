@@ -56,6 +56,7 @@ class AgentState(TypedDict, total=False):
     hold_end_time: Optional[str]
     hold_event_id: Optional[str]
     hold_event_type: Optional[str]  # HOLD, S-EVENT, C-EVENT, A-EVENT
+    hold_html_link: Optional[str]
 
     # --- P.E.T. tracker fields ---
     pet_operation: Optional[str]  # 'read' or 'update'

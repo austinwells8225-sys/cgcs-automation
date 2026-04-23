@@ -69,7 +69,7 @@ def after_intake_classification(state: AgentState) -> str:
     """Route after intake classification."""
     if state.get("errors"):
         return "handle_error"
-    return "draft_intake_emails"
+    return "create_hold_from_intake"
 
 
 def after_lead_assignment(state: AgentState) -> str:

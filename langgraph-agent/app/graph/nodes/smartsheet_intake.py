@@ -5,12 +5,14 @@ from __future__ import annotations
 import logging
 
 from app.graph.state import AgentState
+from app.services.google_calendar import create_hold
 from app.services.intake_classifier import (
     classify_request,
     draft_furniture_email,
     draft_intake_response,
     draft_police_email,
 )
+from app.services.intake_processor import build_calendar_hold
 
 logger = logging.getLogger(__name__)
 
@@ -38,6 +40,55 @@ def classify_intake_request(state: AgentState) -> dict:
     return {
         "intake_classification": classification,
         "intake_difficulty": classification["difficulty"],
+    }
+
+
+def create_hold_from_intake(state: AgentState) -> dict:
+    """Create a Google Calendar HOLD event from parsed Smartsheet intake.
+
+    Failures do not abort the flow — drafting proceeds regardless because the
+    edge out of this node is unconditional.
+    """
+    parsed = state.get("smartsheet_parsed", {})
+    if not parsed:
+        logger.warning("No parsed intake data for hold creation; skipping")
+        return {}
+
+    hold = build_calendar_hold(parsed)
+
+    if not (hold["title"] and hold["start_date"] and hold["start_time"] and hold["end_time"]):
+        logger.warning(
+            "Missing required fields for hold creation (event=%s); skipping",
+            parsed.get("event_code", "unknown"),
+        )
+        return {}
+
+    try:
+        result = create_hold(
+            title=hold["title"],
+            date=hold["start_date"],
+            start_time=hold["start_time"],
+            end_time=hold["end_time"],
+            description=hold["description"],
+        )
+    except Exception as e:
+        logger.error(
+            "Calendar hold creation failed for %s: %s",
+            parsed.get("event_code", "unknown"),
+            e,
+        )
+        return {
+            "errors": state.get("errors", []) + [f"Calendar hold creation failed: {e}"],
+        }
+
+    logger.info(
+        "Calendar hold created for %s: event_id=%s",
+        parsed.get("event_code", "unknown"),
+        result.get("event_id"),
+    )
+    return {
+        "hold_event_id": result.get("event_id"),
+        "hold_html_link": result.get("html_link"),
     }
 
 

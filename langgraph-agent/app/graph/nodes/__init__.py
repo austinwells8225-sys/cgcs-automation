@@ -41,6 +41,7 @@ from app.graph.nodes.reminders import (
 from app.graph.nodes.daily_digest import build_daily_digest
 from app.graph.nodes.smartsheet_intake import (
     classify_intake_request,
+    create_hold_from_intake,
     draft_intake_emails,
 )
 from app.graph.nodes.email_reply import process_email_reply
@@ -83,6 +84,7 @@ __all__ = [
     "build_daily_digest",
     # Smartsheet intake
     "classify_intake_request",
+    "create_hold_from_intake",
     "draft_intake_emails",
     # Email reply
     "process_email_reply",

@@ -18,6 +18,7 @@ from app.graph.nodes import (
     check_calendar_availability,
     classify_email,
     create_calendar_hold,
+    create_hold_from_intake,
     determine_pricing,
     draft_approval_response,
     draft_email_reply,
@@ -83,6 +84,7 @@ def build_graph() -> StateGraph:
 
     # --- Smartsheet intake nodes ---
     graph.add_node("classify_intake_request", classify_intake_request)
+    graph.add_node("create_hold_from_intake", create_hold_from_intake)
     graph.add_node("draft_intake_emails", draft_intake_emails)
 
     # --- Email reply nodes ---
@@ -136,6 +138,7 @@ def build_graph() -> StateGraph:
 
     # --- Smartsheet intake edges ---
     graph.add_conditional_edges("classify_intake_request", after_intake_classification)
+    graph.add_edge("create_hold_from_intake", "draft_intake_emails")
     graph.add_edge("draft_intake_emails", END)
 
     # --- Email reply edges ---
