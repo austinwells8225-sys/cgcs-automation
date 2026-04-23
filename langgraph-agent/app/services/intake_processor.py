@@ -87,26 +87,16 @@ def _format_event_date(d: date | None) -> str:
 
 
 def _format_room_display(event_room: str | None) -> str:
-    """Format room code for display with full name + code.
-
-    'RGC3.3340' -> 'CGCS Main Hall (RGC3.3340)'
-    'RGC3.3328' -> 'CGCS Classroom (RGC3.3328)'
-    Unknown code -> returned as-is.
-    Empty/None   -> empty string.
-    """
+    """Format room code for display, e.g. 'RGC3.3340' → '3340 (Big Room)'."""
     if not event_room:
         return ""
-    room = event_room.strip()
-    # Match like "RGC3.3340" and capture the number after the dot
-    m = re.search(r"\.(\d+)", room)
+    m = re.search(r"\.(\d+)", event_room)
     if m:
         room_num = m.group(1)
         if room_num == "3340":
-            return f"CGCS Main Hall ({room})"
-        if room_num == "3328":
-            return f"CGCS Classroom ({room})"
-        return room  # unknown room number, preserve full code
-    return room
+            return "3340 (Big Room)"
+        return room_num
+    return event_room
 
 
 # ============================================================
