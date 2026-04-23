@@ -25,6 +25,7 @@ from app.graph.nodes import (
     draft_intake_emails,
     draft_rejection,
     process_email_reply,
+    write_pet_row_from_intake,
     evaluate_eligibility,
     evaluate_room_setup,
     find_due_reminders,
@@ -85,6 +86,7 @@ def build_graph() -> StateGraph:
     # --- Smartsheet intake nodes ---
     graph.add_node("classify_intake_request", classify_intake_request)
     graph.add_node("create_hold_from_intake", create_hold_from_intake)
+    graph.add_node("write_pet_row_from_intake", write_pet_row_from_intake)
     graph.add_node("draft_intake_emails", draft_intake_emails)
 
     # --- Email reply nodes ---
@@ -138,7 +140,8 @@ def build_graph() -> StateGraph:
 
     # --- Smartsheet intake edges ---
     graph.add_conditional_edges("classify_intake_request", after_intake_classification)
-    graph.add_edge("create_hold_from_intake", "draft_intake_emails")
+    graph.add_edge("create_hold_from_intake", "write_pet_row_from_intake")
+    graph.add_edge("write_pet_row_from_intake", "draft_intake_emails")
     graph.add_edge("draft_intake_emails", END)
 
     # --- Email reply edges ---

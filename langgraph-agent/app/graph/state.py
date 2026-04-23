@@ -98,6 +98,7 @@ class AgentState(TypedDict, total=False):
     intake_classification: Optional[dict]
     intake_difficulty: Optional[str]  # 'easy', 'mid', 'hard'
     intake_draft_emails: Optional[list[dict]]
+    pet_row_written: Optional[bool]
 
     # --- Email reply / conversation fields ---
     reply_body: Optional[str]

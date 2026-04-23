@@ -43,6 +43,7 @@ from app.graph.nodes.smartsheet_intake import (
     classify_intake_request,
     create_hold_from_intake,
     draft_intake_emails,
+    write_pet_row_from_intake,
 )
 from app.graph.nodes.email_reply import process_email_reply
 
@@ -86,6 +87,7 @@ __all__ = [
     "classify_intake_request",
     "create_hold_from_intake",
     "draft_intake_emails",
+    "write_pet_row_from_intake",
     # Email reply
     "process_email_reply",
 ]

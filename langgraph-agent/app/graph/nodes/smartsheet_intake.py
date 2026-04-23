@@ -6,13 +6,14 @@ import logging
 
 from app.graph.state import AgentState
 from app.services.google_calendar import create_hold
+from app.services.google_sheets import append_row
 from app.services.intake_classifier import (
     classify_request,
     draft_furniture_email,
     draft_intake_response,
     draft_police_email,
 )
-from app.services.intake_processor import build_calendar_hold
+from app.services.intake_processor import build_calendar_hold, build_pet_row
 
 logger = logging.getLogger(__name__)
 
@@ -90,6 +91,40 @@ def create_hold_from_intake(state: AgentState) -> dict:
         "hold_event_id": result.get("event_id"),
         "hold_html_link": result.get("html_link"),
     }
+
+
+def write_pet_row_from_intake(state: AgentState) -> dict:
+    """Append a row to the P.E.T. tracker spreadsheet from parsed Smartsheet intake.
+
+    Failures do not abort the flow — drafting proceeds regardless because the
+    edge out of this node is unconditional.
+    """
+    parsed = state.get("smartsheet_parsed", {})
+    if not parsed:
+        logger.warning("No parsed intake data for P.E.T. row write; skipping")
+        return {}
+
+    row = build_pet_row(parsed)
+
+    try:
+        result = append_row(row)
+    except Exception as e:
+        logger.error(
+            "P.E.T. row write failed for %s: %s",
+            parsed.get("event_code", "unknown"),
+            e,
+        )
+        return {
+            "errors": state.get("errors", []) + [f"P.E.T. row write failed: {e}"],
+        }
+
+    logger.info(
+        "P.E.T. row written for %s: range=%s rows=%s",
+        parsed.get("event_code", "unknown"),
+        result.get("updated_range"),
+        result.get("updated_rows"),
+    )
+    return {"pet_row_written": True}
 
 
 def draft_intake_emails(state: AgentState) -> dict:
