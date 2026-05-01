@@ -38,6 +38,9 @@ AI automation engine for the Center for Government & Civic Service at Austin Com
 - Versioned line-item quotes
 - Reports: revenue, conversion funnel, top orgs, compliance, process insights
 - Dashboard alerts
+- Impact metrics: 4-tier rollup (Community / Monetization / ACC / CGCS) with YoY
+- Manual off-site CGCS event entry endpoint
+- Next.js operations dashboard (Impact homepage, Inbox, Manual entry, Alerts)
 
 ## Commands
 - Start: `docker compose up -d`
