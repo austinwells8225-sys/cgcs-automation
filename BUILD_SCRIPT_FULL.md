@@ -60,3 +60,5 @@ The CGCS AI intake system runs in human-in-the-loop draft-only mode (APScheduler
 5. right and we wanna get this on our own domain/ dashboard showing revenue tracking pending items and stuff like that
 6. hey so where are we and what do we need to do to get this all going please and thank you
 7. cgcs controls the cgcs-acc.org dashboard can be a group login once we get that going anyways continue to next steps
+8. yeah lets do that also i want you to look at these notes from my boss from our meeting yesterday we want this dashboard live /Users/a2068129/Downloads/meeting_transcript.txt
+9. Go with the existing reservation rows. I don't really know what that means, TVH. The off-site CGCS events live just like in our own internal communications. Yeah, yeah, I already have a server. Let's just keep going. Let's just build some stuff. We just need to get this done and it be able to do all the things here. We go. Let's go.
