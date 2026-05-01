@@ -82,6 +82,28 @@ services:
     networks:
       - cgcs-net
 
+  cgcs-dashboard:
+    labels:
+      - "coolify.port=3000"
+      - "coolify.managed=true"
+    build:
+      context: ./cgcs-dashboard
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      - AGENT_API_URL=${AGENT_API_URL:-http://langgraph-agent:8000}
+      - LANGGRAPH_API_KEY=${LANGGRAPH_API_KEY}
+      - NEXTAUTH_URL=${DASHBOARD_URL:-http://localhost:3000}
+      - NEXTAUTH_SECRET=${NEXTAUTH_SECRET}
+      - GOOGLE_CLIENT_ID=${GOOGLE_OAUTH_CLIENT_ID:-}
+      - GOOGLE_CLIENT_SECRET=${GOOGLE_OAUTH_CLIENT_SECRET:-}
+      - ALLOWED_EMAIL_DOMAINS=${ALLOWED_EMAIL_DOMAINS:-austincc.edu,cgcs-acc.org}
+    depends_on:
+      langgraph-agent:
+        condition: service_started
+    networks:
+      - cgcs-net
+
   postgres:
     image: postgres:16-alpine
     restart: unless-stopped
@@ -95,6 +117,12 @@ services:
       - ./db/migrations/001_initial_schema.sql:/docker-entrypoint-initdb.d/02-schema.sql:ro
       - ./db/migrations/002_seed_data.sql:/docker-entrypoint-initdb.d/03-seed.sql:ro
       - ./db/migrations/003_multi_capability.sql:/docker-entrypoint-initdb.d/04-multi-capability.sql:ro
+      - ./db/migrations/005_revenue_tracking.sql:/docker-entrypoint-initdb.d/05-revenue.sql:ro
+      - ./db/migrations/007_compliance_checklist.sql:/docker-entrypoint-initdb.d/07-compliance.sql:ro
+      - ./db/migrations/008_rejection_patterns.sql:/docker-entrypoint-initdb.d/08-rejection.sql:ro
+      - ./db/migrations/009_quote_versions.sql:/docker-entrypoint-initdb.d/09-quotes.sql:ro
+      - ./db/migrations/010_dashboard_alerts.sql:/docker-entrypoint-initdb.d/10-alerts.sql:ro
+      - ./db/migrations/011_impact_metrics.sql:/docker-entrypoint-initdb.d/11-impact.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
       interval: 10s

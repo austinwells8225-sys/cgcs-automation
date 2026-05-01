@@ -552,3 +552,80 @@ class DashboardAlertResponse(BaseModel):
 class DashboardAlertsListResponse(BaseModel):
     count: int
     alerts: list[DashboardAlertResponse]
+
+
+# ============================================================
+# Impact metrics (Bryan's storytelling tiers)
+# ============================================================
+
+class ImpactTier(BaseModel):
+    total_events: int = 0
+    total_people: int = 0
+    total_hours: float = 0.0
+    total_revenue: float = 0.0
+
+
+class CgcsAudience(BaseModel):
+    students: int = 0
+    staff: int = 0
+    community: int = 0
+
+
+class CgcsImpactTier(ImpactTier):
+    training_hours: float = 0.0
+    training_events: int = 0
+    on_site_events: int = 0
+    off_site_events: int = 0
+    on_site_hours: float = 0.0
+    off_site_hours: float = 0.0
+    audience: CgcsAudience = CgcsAudience()
+
+
+class ImpactWindow(BaseModel):
+    community: ImpactTier
+    monetization: ImpactTier
+    acc: ImpactTier
+    cgcs: CgcsImpactTier
+
+
+class ImpactPreviousWindow(ImpactWindow):
+    start: str
+    end: str
+
+
+class ImpactReportResponse(BaseModel):
+    period: str
+    start: str
+    end: str
+    current: ImpactWindow
+    previous_year: ImpactPreviousWindow
+
+
+class ManualEventRequest(BaseModel):
+    event_name: str
+    requested_date: str  # YYYY-MM-DD
+    requested_start_time: str  # HH:MM
+    requested_end_time: str  # HH:MM
+    requester_name: Optional[str] = "CGCS"
+    requester_email: Optional[str] = "admin@cgcs-acc.org"
+    requester_organization: Optional[str] = "CGCS"
+    estimated_attendees: Optional[int] = None
+    actual_attendance: Optional[int] = None
+    actual_revenue: Optional[float] = None
+    event_subtype: Optional[str] = None  # training | convening | co_branded | other
+    event_location: str = "off_site"  # on_site | off_site
+    attendance_students: Optional[int] = None
+    attendance_staff: Optional[int] = None
+    attendance_community: Optional[int] = None
+    training_hours_delivered: Optional[float] = None
+    notes: Optional[str] = None
+
+
+class ManualEventResponse(BaseModel):
+    request_id: str
+    event_name: str
+    requested_date: str
+    event_category: str
+    event_subtype: Optional[str] = None
+    event_location: str
+    source: str

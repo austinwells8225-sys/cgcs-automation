@@ -50,6 +50,10 @@ from app.db.report_queries import (
     get_revenue_report,
     get_top_organizations,
 )
+from app.db.impact_queries import (
+    create_manual_event,
+    get_impact_report,
+)
 from app.graph.nodes.shared import _invoke_with_retry, _parse_json_response
 from app.prompt_tuning import get_rejection_lessons
 from app.prompts.templates import REJECTION_REWORK_SYSTEM_PROMPT
@@ -126,6 +130,9 @@ from app.models import (
     QuarterlyReportResponse,
     DashboardAlertResponse,
     DashboardAlertsListResponse,
+    ImpactReportResponse,
+    ManualEventRequest,
+    ManualEventResponse,
     SmartsheetWebhookRequest,
     EmailReplyWebhookRequest,
     AdminResponseWebhookRequest,
@@ -1186,6 +1193,87 @@ async def top_organizations(
         end=end_date.isoformat(),
         limit=limit,
         organizations=rows,
+    )
+
+
+# ============================================================
+# Impact metrics (Bryan's storytelling tiers)
+# ============================================================
+
+@app.get("/api/v1/impact", response_model=ImpactReportResponse)
+async def impact_report(
+    period: str = "year",
+    start: str = "",
+    _auth: str = Security(verify_api_key),
+):
+    """Four-tier impact rollup with year-over-year comparison.
+
+    Returns Community / Monetization / ACC / CGCS metrics for the requested
+    window plus the same window one year earlier.
+    """
+    start_date = _validate_report_params(period, start)
+    result = await get_impact_report(period, start_date)
+    return ImpactReportResponse(**result)
+
+
+@app.post("/api/v1/events/manual", response_model=ManualEventResponse)
+async def manual_event(
+    payload: ManualEventRequest,
+    _auth: str = Security(verify_api_key),
+):
+    """Manually log a CGCS event (typically off-site) for impact metrics.
+
+    Off-site CGCS events (other ACC campuses, partner venues) don't flow
+    through Smartsheet intake, so they need a direct entry path. The row
+    lands as status='completed' with source='manual'.
+    """
+    from datetime import time as _time
+    from uuid import uuid4
+
+    try:
+        rd = date.fromisoformat(payload.requested_date)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="requested_date must be YYYY-MM-DD")
+
+    def _parse_time(value: str) -> _time:
+        try:
+            return _time.fromisoformat(value)
+        except ValueError:
+            raise HTTPException(status_code=400, detail=f"Invalid time format: {value}")
+
+    request_id = f"manual-{uuid4().hex[:12]}"
+    row = await create_manual_event(
+        request_id=request_id,
+        event_name=payload.event_name,
+        requested_date=rd,
+        requested_start_time=_parse_time(payload.requested_start_time),
+        requested_end_time=_parse_time(payload.requested_end_time),
+        requester_name=payload.requester_name or "CGCS",
+        requester_email=payload.requester_email or "admin@cgcs-acc.org",
+        requester_organization=payload.requester_organization,
+        estimated_attendees=payload.estimated_attendees,
+        actual_attendance=payload.actual_attendance,
+        actual_revenue=payload.actual_revenue,
+        event_subtype=payload.event_subtype,
+        event_location=payload.event_location,
+        attendance_students=payload.attendance_students,
+        attendance_staff=payload.attendance_staff,
+        attendance_community=payload.attendance_community,
+        training_hours_delivered=payload.training_hours_delivered,
+        notes=payload.notes,
+    )
+
+    if not row:
+        raise HTTPException(status_code=500, detail="Failed to insert manual event")
+
+    return ManualEventResponse(
+        request_id=row["request_id"],
+        event_name=row["event_name"],
+        requested_date=row["requested_date"].isoformat(),
+        event_category=str(row["event_category"]),
+        event_subtype=str(row["event_subtype"]) if row.get("event_subtype") else None,
+        event_location=str(row["event_location"]),
+        source=row["source"] or "manual",
     )
 
 
