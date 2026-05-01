@@ -57,10 +57,14 @@ services:
       - LANGCHAIN_PROJECT=${LANGCHAIN_PROJECT:-cgcs-automation}
       - LANGCHAIN_TRACING_V2=${LANGCHAIN_TRACING_V2:-true}
       # Google APIs
-      - GOOGLE_SERVICE_ACCOUNT_FILE=${GOOGLE_SERVICE_ACCOUNT_FILE:-}
+      - GOOGLE_SERVICE_ACCOUNT_FILE=${GOOGLE_SERVICE_ACCOUNT_FILE:-/app/credentials/google-service-account.json}
       - GOOGLE_CALENDAR_ID=${GOOGLE_CALENDAR_ID:-primary}
       - PET_TRACKER_SPREADSHEET_ID=${PET_TRACKER_SPREADSHEET_ID:-}
-      # Zoho Mail
+      - GMAIL_DELEGATED_USER=${GMAIL_DELEGATED_USER:-admin@cgcs-acc.org}
+      # Smartsheet inbox poller
+      - SMARTSHEET_POLL_ENABLED=${SMARTSHEET_POLL_ENABLED:-true}
+      - SMARTSHEET_POLL_MINUTES=${SMARTSHEET_POLL_MINUTES:-5}
+      # Zoho Mail (legacy)
       - ZOHO_MAIL_TOKEN=${ZOHO_MAIL_TOKEN:-}
       - ZOHO_ACCOUNT_ID=${ZOHO_ACCOUNT_ID:-}
       # Email
