@@ -175,6 +175,15 @@ def _run_config(task_type: str, request_id: str) -> dict:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("CGCS LangGraph Agent starting up")
+    try:
+        from app.db.migrations_runner import run_migrations
+        report = await run_migrations()
+        logger.info("Migrations: %s", report)
+    except Exception:
+        # Don't crash the whole app if migrations fail — surface the error
+        # in logs and let the operator decide. The endpoints that need the
+        # newer schema will 500 with a clearer downstream error.
+        logger.exception("Migration runner raised; continuing startup")
     start_scheduler(compiled_graph)
     yield
     logger.info("Shutting down: stopping scheduler")

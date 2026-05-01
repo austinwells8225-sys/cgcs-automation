@@ -71,6 +71,7 @@ services:
       - EMAIL_AUTO_SEND_ALLOWLIST=${EMAIL_AUTO_SEND_ALLOWLIST:-}
     volumes:
       - ./credentials:/app/credentials:ro
+      - ./db/migrations:/app/db/migrations:ro
     depends_on:
       postgres:
         condition: service_healthy
