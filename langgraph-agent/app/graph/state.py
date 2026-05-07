@@ -41,6 +41,8 @@ class AgentState(TypedDict, total=False):
     email_draft_reply: Optional[str]
     email_auto_send: Optional[bool]
     email_rejection_lessons: Optional[str]
+    email_is_initial_reachout: Optional[bool]
+    email_attachments: Optional[list[dict]]  # [{filename, content (bytes), mime_type}]
 
     # --- Calendar check fields ---
     calendar_query_date: Optional[str]

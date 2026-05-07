@@ -359,6 +359,7 @@ async def create_draft_reply(
     subject: str,
     body: str,
     cc: str | None = None,
+    attachments: list[dict] | None = None,
 ) -> dict:
     """Create a Gmail draft threaded as a reply to an existing message.
 
@@ -391,6 +392,7 @@ async def create_draft_reply(
         message = _build_mime_message(
             to, subject, body, cc=cc,
             in_reply_to=original_message_id,
+            attachments=attachments,
         )
         raw = base64.urlsafe_b64encode(message.as_bytes()).decode("ascii")
         result = _retry_transient(

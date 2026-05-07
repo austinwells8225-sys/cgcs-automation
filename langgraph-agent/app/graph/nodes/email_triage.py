@@ -18,6 +18,7 @@ from app.graph.nodes.shared import (
 )
 from app.graph.state import AgentState
 from app.prompts.templates import EMAIL_TRIAGE_SYSTEM_PROMPT
+from app.services.agreement_attacher import build_agreement_attachment
 
 logger = logging.getLogger(__name__)
 
@@ -85,6 +86,7 @@ def classify_email(state: AgentState) -> dict:
         result = _parse_json_response(content)
         priority = result.get("priority", "medium")
         category = result.get("category", "other")
+        is_initial_reachout = bool(result.get("is_initial_reachout", False))
 
         # VIP priority boost
         if is_vip_sender(email_from, email_subject):
@@ -94,6 +96,7 @@ def classify_email(state: AgentState) -> dict:
         return {
             "email_priority": priority,
             "email_category": category,
+            "email_is_initial_reachout": is_initial_reachout,
         }
     except (json.JSONDecodeError, KeyError) as e:
         logger.error("Failed to parse email classification: %s", e)
@@ -141,9 +144,24 @@ def draft_email_reply(state: AgentState) -> dict:
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_message},
         ])
+
+        # If the classifier flagged this as a first reachout for an
+        # event request, auto-attach the right CGCS user agreement PDF
+        # (internal vs external, picked by the sender's domain).
+        attachments: list[dict] = []
+        if state.get("email_is_initial_reachout") and category == "event_request":
+            attachment = build_agreement_attachment(email_from)
+            if attachment:
+                attachments.append(attachment)
+                logger.info(
+                    "Attached %s to first-reachout draft for %s",
+                    attachment["filename"], email_from,
+                )
+
         return {
             "email_draft_reply": content,
             "draft_response": content,
+            "email_attachments": attachments or None,
             "requires_approval": True,
         }
     except Exception as e:

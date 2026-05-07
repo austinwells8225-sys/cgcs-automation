@@ -239,8 +239,21 @@ events within 14 days, complaints
 {
     "priority": "high|medium|low",
     "category": "event_request|intake_followup|aais_receipt|smartsheet_notification|calendar_invite|question|follow_up|complaint|vendor|spam|other",
+    "is_initial_reachout": true|false,
     "reasoning": "Brief explanation of classification"
 }
+
+## is_initial_reachout — when to mark TRUE:
+Set true when this is a NEW (cold) inquiry about renting, hosting, or using \
+CGCS event space — and NOT a reply, follow-up, or thread continuation. \
+Signals: no "Re:" / "Fwd:" prefix, no quoted prior message, sender hasn't \
+been seen in any earlier thread, language reads like a first-time outside \
+ask ("interested in", "would like to host", "renting your space", \
+"availability for"). When true, the draft will auto-attach the appropriate \
+CGCS user agreement PDF (internal vs external, picked by sender domain), \
+so accuracy here directly affects whether the right PDF lands on the draft. \
+For Smartsheet notifications, intake follow-ups, calendar invites, and \
+complaints, set false.
 
 ## When drafting replies:
 - Be professional and represent CGCS/ACC well

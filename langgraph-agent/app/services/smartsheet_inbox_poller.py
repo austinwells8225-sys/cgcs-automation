@@ -168,6 +168,7 @@ async def _process_one(
             to=to_addr,
             subject=reply_subject,
             body=draft_body,
+            attachments=result.get("email_attachments"),
         )
         draft_id = draft_result.get("draft_id", "")
         logger.info(
