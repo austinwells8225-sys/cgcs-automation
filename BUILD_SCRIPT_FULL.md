@@ -66,3 +66,6 @@ The CGCS AI intake system runs in human-in-the-loop draft-only mode (APScheduler
 7. cgcs controls the cgcs-acc.org dashboard can be a group login once we get that going anyways continue to next steps
 8. yeah lets do that also i want you to look at these notes from my boss from our meeting yesterday we want this dashboard live /Users/a2068129/Downloads/meeting_transcript.txt
 9. Go with the existing reservation rows. I don't really know what that means, TVH. The off-site CGCS events live just like in our own internal communications. Yeah, yeah, I already have a server. Let's just keep going. Let's just build some stuff. We just need to get this done and it be able to do all the things here. We go. Let's go.
+10. Hey I need you to tell me if there's a diff in the code that hasn't been pushed to main. Enumararte them and summarize it in one paragraph
+11. ok so does the project has claude.md files or memory of what is the goal? y/n
+12. ok. /analyze Do the most robust, detailed and LLM friendly markdown file that summarizes what the state of the project (where the project is right now) and where is it going.
