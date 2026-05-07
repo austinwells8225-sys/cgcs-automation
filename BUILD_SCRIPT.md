@@ -19,12 +19,14 @@ AI automation engine for the Center for Government & Civic Service at Austin Com
 
 ## Structure
 - `langgraph-agent/app/graph/` — router, nodes, edges, state
-- `langgraph-agent/app/services/` — Gmail, Calendar, Sheets, classifier, processor, scheduler, inbox poller
-- `db/migrations/` — SQL migrations 001-010
-- `n8n/` — workflow JSON exports
-- `tests/` — pytest suite
+- `langgraph-agent/app/services/` — Gmail, Calendar, Sheets, classifier, processor, scheduler, inbox poller, agreement attacher
+- `db/migrations/` — SQL migrations 001-011
+- `cgcs-dashboard/` — Next.js 15 ops UI (Impact / Inbox / Alerts / Manual entry)
+- `n8n/` — workflow JSON exports (legacy / fallback)
+- `tests/` — pytest suite (604 tests)
 - `credentials/` — Google service account JSON (gitignored)
-- `docker-compose.yml` — 3 services (n8n, langgraph-agent, postgres)
+- `docker-compose.yml` — 4 services (n8n, langgraph-agent, cgcs-dashboard, postgres)
+- `PROJECT_STATE.md` — LLM-friendly snapshot of current state + roadmap
 
 ## Features
 - Smartsheet intake pipeline: parse → classify → calendar HOLD → P.E.T. row → drafts
