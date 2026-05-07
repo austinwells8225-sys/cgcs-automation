@@ -34,15 +34,17 @@ AI automation engine for the Center for Government & Civic Service at Austin Com
 - Email reply edit-loop with escalation detection
 - Calendar availability check + holds
 - P.E.T. tracker query/update with approval staging
-- Event lead assignment + reminder scheduling
+- Event lead assignment + reminder scheduling (30d/14d/7d/48h)
 - Daily digest (11 sections)
 - Compliance checklist with deadlines
 - Versioned line-item quotes
 - Reports: revenue, conversion funnel, top orgs, compliance, process insights
-- Dashboard alerts
+- Dashboard alerts (AV/catering changes, dead-letter)
 - Impact metrics: 4-tier rollup (Community / Monetization / ACC / CGCS) with YoY
 - Manual off-site CGCS event entry endpoint
 - Next.js operations dashboard (Impact homepage, Inbox, Manual entry, Alerts)
+- Auto-attach correct CGCS user-agreement PDF (internal vs external) on first-reachout drafts
+- Startup migration runner self-heals long-lived DBs
 
 ## Commands
 - Start: `docker compose up -d`
