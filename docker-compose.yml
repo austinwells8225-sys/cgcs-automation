@@ -38,8 +38,9 @@ services:
       - "coolify.port=8000"
       - "coolify.managed=true"
     build:
-      context: ./langgraph-agent
-      dockerfile: Dockerfile
+      # repo root so the Dockerfile can COPY db/migrations into the image
+      context: .
+      dockerfile: langgraph-agent/Dockerfile
     restart: unless-stopped
     environment:
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
@@ -71,7 +72,6 @@ services:
       - EMAIL_AUTO_SEND_ALLOWLIST=${EMAIL_AUTO_SEND_ALLOWLIST:-}
     volumes:
       - ./credentials:/app/credentials:ro
-      - ./db/migrations:/app/db/migrations:ro
     depends_on:
       postgres:
         condition: service_healthy
@@ -124,6 +124,8 @@ services:
       - ./db/migrations/009_quote_versions.sql:/docker-entrypoint-initdb.d/09-quotes.sql:ro
       - ./db/migrations/010_dashboard_alerts.sql:/docker-entrypoint-initdb.d/10-alerts.sql:ro
       - ./db/migrations/011_impact_metrics.sql:/docker-entrypoint-initdb.d/11-impact.sql:ro
+      - ./db/migrations/012_cgcs_lead_and_metadata.sql:/docker-entrypoint-initdb.d/12-lead-metadata.sql:ro
+      - ./db/migrations/013_budget_ledger.sql:/docker-entrypoint-initdb.d/13-budget.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
       interval: 10s
