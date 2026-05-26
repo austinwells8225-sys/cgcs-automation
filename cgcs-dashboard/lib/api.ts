@@ -5,26 +5,43 @@
 const AGENT_URL = process.env.AGENT_API_URL ?? "http://langgraph-agent:8000";
 const API_KEY = process.env.LANGGRAPH_API_KEY ?? "";
 
+// At build time the agent isn't running, so fetches would hang forever.
+// 5s is plenty at runtime; 5s also lets the build fail fast and render error
+// state, which pages handle gracefully with .catch().
+const FETCH_TIMEOUT_MS = 5000;
+
 type FetchOpts = RequestInit & { revalidate?: number };
 
 async function agentFetch<T>(path: string, opts: FetchOpts = {}): Promise<T> {
   const { revalidate, ...rest } = opts;
-  const res = await fetch(`${AGENT_URL}${path}`, {
-    ...rest,
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${API_KEY}`,
-      ...(rest.headers ?? {}),
-    },
-    next: revalidate ? { revalidate } : undefined,
-    cache: rest.cache ?? "no-store",
-  });
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+  try {
+    const res = await fetch(`${AGENT_URL}${path}`, {
+      ...rest,
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${API_KEY}`,
+        ...(rest.headers ?? {}),
+      },
+      next: revalidate ? { revalidate } : undefined,
+      cache: rest.cache ?? "no-store",
+      signal: controller.signal,
+    });
 
-  if (!res.ok) {
-    const text = await res.text().catch(() => "");
-    throw new Error(`Agent ${res.status} on ${path}: ${text}`);
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      throw new Error(`Agent ${res.status} on ${path}: ${text}`);
+    }
+    return res.json() as Promise<T>;
+  } catch (e) {
+    if ((e as Error)?.name === "AbortError") {
+      throw new Error(`Agent fetch timed out (${FETCH_TIMEOUT_MS}ms) on ${path}`);
+    }
+    throw e;
+  } finally {
+    clearTimeout(timer);
   }
-  return res.json() as Promise<T>;
 }
 
 // --- Impact ---------------------------------------------------------------
