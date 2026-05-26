@@ -4,6 +4,8 @@ const links = [
   { href: "/", label: "Impact" },
   { href: "/inbox", label: "Inbox" },
   { href: "/reservations", label: "Reservations" },
+  { href: "/calendar", label: "Calendar" },
+  { href: "/budget", label: "Budget" },
   { href: "/events/manual", label: "Log Off-Site Event" },
   { href: "/surveys", label: "Surveys" },
   { href: "/alerts", label: "Alerts" },

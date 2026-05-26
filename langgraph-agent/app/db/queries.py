@@ -51,6 +51,16 @@ async def create_reservation(data: dict[str, Any]) -> UUID:
     return row["id"]
 
 
+async def get_reservation_by_uuid(reservation_id: str) -> dict | None:
+    """Fetch a reservation by UUID. Returns every column including source_metadata."""
+    pool = await get_pool()
+    row = await pool.fetchrow(
+        "SELECT * FROM cgcs.reservations WHERE id = $1::uuid",
+        reservation_id,
+    )
+    return dict(row) if row else None
+
+
 async def get_reservation(request_id: str) -> dict | None:
     """Fetch a reservation by request_id."""
     pool = await get_pool()
@@ -59,6 +69,85 @@ async def get_reservation(request_id: str) -> dict | None:
         request_id,
     )
     return dict(row) if row else None
+
+
+SORTABLE_COLUMNS = {
+    "date": "requested_date",
+    "event": "event_name",
+    "org": "requester_organization",
+    "lead": "cgcs_lead",
+    "category": "event_category",
+    "status": "status",
+    "revenue": "actual_revenue",
+    "attendees": "actual_attendance",
+}
+
+
+VALID_EVENT_CATEGORIES = {"cgcs", "acc", "monetization"}
+
+
+async def update_reservation_category(reservation_id: str, category: str) -> dict | None:
+    """Update a reservation's event_category by UUID. Returns the updated row or None."""
+    if category not in VALID_EVENT_CATEGORIES:
+        raise ValueError(f"Invalid category: {category!r}")
+    pool = await get_pool()
+    row = await pool.fetchrow(
+        """
+        UPDATE cgcs.reservations
+        SET event_category = $2::cgcs.event_category, updated_at = NOW()
+        WHERE id = $1::uuid
+        RETURNING id, event_name, event_category
+        """,
+        reservation_id, category,
+    )
+    return dict(row) if row else None
+
+
+async def list_reservations(
+    status: str | None = None,
+    category: str | None = None,
+    date_from: str | None = None,
+    date_to: str | None = None,
+    limit: int = 500,
+    sort: str | None = None,
+    direction: str = "desc",
+) -> list[dict]:
+    """List reservations for the dashboard table."""
+    pool = await get_pool()
+    column = SORTABLE_COLUMNS.get((sort or "").lower(), "requested_date")
+    dir_sql = "ASC" if direction.lower() == "asc" else "DESC"
+    order_clause = f"{column} {dir_sql} NULLS LAST, created_at DESC"
+
+    where_parts: list[str] = []
+    args: list = [limit]
+    if status:
+        args.append(status)
+        where_parts.append(f"status = ${len(args)}::reservation_status")
+    if category:
+        args.append(category)
+        where_parts.append(f"event_category = ${len(args)}::cgcs.event_category")
+    if date_from:
+        args.append(date_from)
+        where_parts.append(f"requested_date >= ${len(args)}::date")
+    if date_to:
+        args.append(date_to)
+        where_parts.append(f"requested_date < ${len(args)}::date")
+    where_sql = ("WHERE " + " AND ".join(where_parts)) if where_parts else ""
+
+    rows = await pool.fetch(
+        f"""
+        SELECT id, request_id, event_name, requester_organization,
+               requested_date, requested_start_time, requested_end_time,
+               room_requested, status, event_category, event_subtype,
+               actual_revenue, actual_attendance, source, cgcs_lead, created_at
+        FROM cgcs.reservations
+        {where_sql}
+        ORDER BY {order_clause}
+        LIMIT $1
+        """,
+        *args,
+    )
+    return [dict(r) for r in rows]
 
 
 async def approve_reservation(

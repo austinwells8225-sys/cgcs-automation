@@ -58,6 +58,53 @@ def _http_with_retry(method: str, url: str, **kwargs) -> httpx.Response:
     raise last_error
 
 
+def list_events(time_min: str, time_max: str, max_results: int = 500) -> list[dict]:
+    """List CGCS calendar events within a range.
+
+    Args:
+        time_min: RFC3339 timestamp (e.g. "2026-05-01T00:00:00-06:00")
+        time_max: RFC3339 timestamp
+        max_results: cap per request
+
+    Returns:
+        Flat list of normalized event dicts.
+    """
+    credentials = _get_credentials()
+    from google.auth.transport.requests import Request
+    credentials.refresh(Request())
+
+    url = f"https://www.googleapis.com/calendar/v3/calendars/{CALENDAR_ID}/events"
+    response = _http_with_retry(
+        "GET",
+        url,
+        params={
+            "timeMin": time_min,
+            "timeMax": time_max,
+            "singleEvents": "true",
+            "orderBy": "startTime",
+            "maxResults": str(max_results),
+        },
+        headers={"Authorization": f"Bearer {credentials.token}"},
+    )
+    items = response.json().get("items", [])
+    out = []
+    for e in items:
+        start = e.get("start", {})
+        end = e.get("end", {})
+        out.append({
+            "id": e.get("id"),
+            "summary": e.get("summary", "(no title)"),
+            "description": e.get("description", ""),
+            "location": e.get("location", ""),
+            "start": start.get("dateTime") or start.get("date"),
+            "end": end.get("dateTime") or end.get("date"),
+            "all_day": "date" in start,
+            "html_link": e.get("htmlLink", ""),
+            "status": e.get("status", ""),
+        })
+    return out
+
+
 def check_availability(date: str, start_time: str, end_time: str) -> dict:
     """Check if the CGCS Events calendar is available for the given time slot.
 

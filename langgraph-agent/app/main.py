@@ -1,9 +1,11 @@
+import asyncio
 import csv
 import io
 import json
 import logging
 import traceback
 import uuid
+from decimal import Decimal
 from contextlib import asynccontextmanager
 from datetime import date
 
@@ -20,9 +22,19 @@ from app.db.queries import (
     create_reservation,
     get_dead_letter_entries,
     get_reservation,
+    get_reservation_by_uuid,
+    list_reservations,
     reject_reservation,
+    update_reservation_category,
     resolve_dead_letter,
 )
+from app.db.budget_queries import (
+    get_budget_summary,
+    list_fiscal_years,
+    list_transactions as list_budget_transactions,
+)
+from app.services.calendar_sync import sync_range as calendar_sync_range
+from app.services.google_calendar import list_events as list_calendar_events
 from app.graph.builder import build_graph
 from app.services.intake_processor import _format_event_date
 from app.db.checklist_queries import (
@@ -451,6 +463,149 @@ async def get_reservation_detail(
     if not reservation:
         raise HTTPException(status_code=404, detail="Reservation not found")
     return reservation
+
+
+@app.get("/api/v1/budget/summary")
+async def budget_summary_endpoint(
+    fy: str | None = None,
+    _auth: str = Security(verify_api_key),
+):
+    """Burn rate + multi-year + category rollup + recent txns for one FY (default: current)."""
+    return await get_budget_summary(fy)
+
+
+@app.get("/api/v1/budget/fiscal-years")
+async def budget_fiscal_years_endpoint(_auth: str = Security(verify_api_key)):
+    years = await list_fiscal_years()
+    for y in years:
+        for k, v in list(y.items()):
+            if hasattr(v, "isoformat"):
+                y[k] = v.isoformat()
+    return {"count": len(years), "fiscal_years": years}
+
+
+@app.get("/api/v1/budget/transactions")
+async def budget_transactions_endpoint(
+    fy: str | None = None,
+    category: str | None = None,
+    sort: str | None = None,
+    direction: str = "desc",
+    limit: int = 500,
+    _auth: str = Security(verify_api_key),
+):
+    rows = await list_budget_transactions(
+        fy_label=fy, category=category, sort=sort,
+        direction=direction, limit=limit,
+    )
+    for r in rows:
+        for k, v in list(r.items()):
+            if hasattr(v, "isoformat"):
+                r[k] = v.isoformat()
+            elif isinstance(v, Decimal):
+                r[k] = float(v)
+    return {"count": len(rows), "transactions": rows}
+
+
+@app.post("/api/v1/calendar/sync")
+async def trigger_calendar_sync(
+    start: str | None = None,
+    end: str | None = None,
+    _auth: str = Security(verify_api_key),
+):
+    """Manually run the calendar -> reservations sync. Defaults to a -30 / +90 day window."""
+    from datetime import date, timedelta
+    today = date.today()
+    s = start or (today - timedelta(days=30)).isoformat()
+    e = end or (today + timedelta(days=90)).isoformat()
+    try:
+        result = await calendar_sync_range(s, e)
+    except Exception as ex:
+        logger.exception("manual calendar sync failed")
+        raise HTTPException(status_code=502, detail=f"Sync failed: {ex}")
+    return result
+
+
+@app.get("/api/v1/calendar/events")
+async def list_calendar_events_endpoint(
+    start: str,
+    end: str,
+    _auth: str = Security(verify_api_key),
+):
+    """List Google Calendar events for the CGCS Events calendar in a date range.
+
+    Query params:
+        start: ISO date (YYYY-MM-DD) — inclusive
+        end:   ISO date (YYYY-MM-DD) — exclusive
+    """
+    time_min = f"{start}T00:00:00-06:00"
+    time_max = f"{end}T00:00:00-06:00"
+    try:
+        events = await asyncio.to_thread(list_calendar_events, time_min, time_max)
+    except Exception as e:
+        logger.error("Calendar fetch failed: %s", e)
+        raise HTTPException(status_code=502, detail=f"Calendar fetch failed: {e}")
+    return {"count": len(events), "events": events}
+
+
+@app.get("/api/v1/reservations/{reservation_id}/full")
+async def get_reservation_full(
+    reservation_id: str,
+    _auth: str = Security(verify_api_key),
+):
+    """Fetch a single reservation by UUID with every field + source_metadata."""
+    try:
+        row = await get_reservation_by_uuid(reservation_id)
+    except Exception as e:
+        logger.exception("get_reservation_full failed")
+        raise HTTPException(status_code=400, detail=str(e))
+    if not row:
+        raise HTTPException(status_code=404, detail="Reservation not found")
+    # Stringify uuid, dates, decimals for JSON-friendliness; deserialize JSONB blobs.
+    for k, v in list(row.items()):
+        if hasattr(v, "isoformat"):
+            row[k] = v.isoformat()
+        elif k in ("source_metadata", "setup_requirements") and isinstance(v, str):
+            try:
+                row[k] = json.loads(v)
+            except Exception:
+                pass
+    return row
+
+
+@app.patch("/api/v1/reservations/{reservation_id}/category")
+async def update_reservation_category_endpoint(
+    reservation_id: str,
+    category: str,
+    _auth: str = Security(verify_api_key),
+):
+    """Update a reservation's event_category. `category` must be cgcs|acc|monetization."""
+    try:
+        row = await update_reservation_category(reservation_id, category)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    if not row:
+        raise HTTPException(status_code=404, detail="Reservation not found")
+    return row
+
+
+@app.get("/api/v1/reservations")
+async def list_reservations_endpoint(
+    status: str | None = None,
+    category: str | None = None,
+    date_from: str | None = None,
+    date_to: str | None = None,
+    limit: int = 500,
+    sort: str | None = None,
+    direction: str = "desc",
+    _auth: str = Security(verify_api_key),
+):
+    """List reservations for the dashboard table. Optional filters: status, category, date_from (incl), date_to (excl)."""
+    rows = await list_reservations(
+        status=status, category=category,
+        date_from=date_from, date_to=date_to,
+        limit=limit, sort=sort, direction=direction,
+    )
+    return {"count": len(rows), "reservations": rows}
 
 
 # ============================================================

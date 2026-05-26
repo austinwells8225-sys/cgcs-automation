@@ -41,3 +41,12 @@ htmlcov/
 .claude/
 credentials/
 docker-compose.yml.backup
+
+# Local-only docker overrides (port mappings, dev tweaks)
+docker-compose.override.yml
+docker-compose.override.*.yml
+
+# Node / Next build artifacts
+node_modules/
+.next/
+out/
