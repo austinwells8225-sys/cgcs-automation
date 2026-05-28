@@ -4,7 +4,40 @@
 CGCS Unified Agent (ai-intake)
 
 ## Overview
-AI automation engine for the Center for Government & Civic Service at Austin Community College. Polls admin@cgcs-acc.org for Smartsheet event-space requests, classifies each as easy/mid/hard, creates a Google Calendar HOLD, appends a P.E.T. tracker row, and saves a Gmail draft reply (plus optional furniture/police drafts) for human approval.
+AI automation engine for the Center for Government & Civic Service at Austin Community College. Ingests Smartsheet event-space requests via a manual paste-in `/intake` form on the dashboard (the prior admin@cgcs-acc.org Gmail poller is retired — ACC firewall blocks the mailbox and ACC Workspace blocks every Google API path the agent needed), classifies each as easy/mid/hard, creates a Google Calendar HOLD, writes a P.E.T. row to Postgres, and produces a reply draft (plus optional furniture/police coordination drafts) staged for human review.
+
+## 2026-05-28 — admin@cgcs-acc.org cleanup + EMAIL_DRY_RUN kill switch
+
+**Request:** Austin opened the architecture file at `~/Documents/Austin Vault/08_output/cgcs-ai-intake-architecture.md` and asked Claude to debug why the code repo cannot read his `austin.wells@austincc.edu` emails. Two-agent code+docs exploration surfaced the truth: the agent never tries to read his inbox — it impersonates `admin@cgcs-acc.org` via DWD and depends on a Gmail filter on Austin's ACC inbox forwarding Smartsheet notifications across. Austin then clarified that `admin@cgcs-acc.org` is fully dead (ACC firewall rejects delivery), Smartsheet notifications now hit his ACC inbox directly, and he wants the agent to read *his* inbox. Cross-referenced against the prior session's pivot notes (BUILD_SCRIPT.md), which already established that ACC Workspace blocks every Google API path the agent needs and the system was pivoted to a manual paste-in `/intake` form.
+
+**Files changed:**
+
+- **`langgraph-agent/app/cgcs_constants.py`** — `CGCS_SYSTEM_EMAIL` reassigned from `admin@cgcs-acc.org` to `austin.wells@austincc.edu` (with explanatory comment); `admin@cgcs-acc.org` removed from `ESCALATION_RECIPIENTS` list so escalations don't vanish into a black-hole mailbox.
+- **`langgraph-agent/app/services/intake_classifier.py`** — signature lines at the end of the Easy reply (`:276`) and the Mid/Hard review reply (`:326`) swapped from `admin@cgcs-acc.org | www.cgcsacc.org` to `austin.wells@austincc.edu | www.cgcsacc.org`. These ship in real client emails.
+- **`langgraph-agent/app/services/reply_processor.py`** — `EDIT_LOOP_LIMIT_MESSAGE` fallback contact text now points clients at `austin.wells@austincc.edu` instead of the dead admin address.
+- **`langgraph-agent/app/models.py:614`** + **`langgraph-agent/app/main.py:1471`** + **`langgraph-agent/app/db/impact_queries.py:199`** — default `requester_email` for the manual-event endpoint and underlying query updated.
+- **`langgraph-agent/app/config.py`** — added new `email_dry_run: bool = False` setting; changed default for `gmail_delegated_user` from `admin@cgcs-acc.org` to `austin.wells@austincc.edu` (env var still overrides; production `.env` is left untouched because the cutover requires ACC IT authorization first).
+- **`langgraph-agent/app/services/gmail_service.py`** — added `EMAIL_DRY_RUN` guard to `send_email` (line ~190) and `reply_to_thread` (line ~290) — when true, both short-circuit with a `logger.warning` and return `{"message_id": "DRY_RUN", ...}` instead of calling the Gmail API. `create_draft_reply` is intentionally untouched (drafts never leave the Drafts folder, so they're always safe). Module docstring + `send_email`/`create_draft` docstrings updated to drop references to the dead admin mailbox.
+- **`langgraph-agent/app/services/smartsheet_inbox_poller.py`** — module docstring updated to describe the configured `GMAIL_DELEGATED_USER` (not the hard-coded admin address).
+- **`langgraph-agent/app/memories/rules.md`** — "All outbound emails from admin@cgcs-acc.org via Gmail API" updated to reflect the live address.
+- **`.env.example`** — `GMAIL_DELEGATED_USER` flipped to `austin.wells@austincc.edu` with an explanatory block-comment about why; new `EMAIL_DRY_RUN=false` flag documented inline.
+- **`scripts/test_gmail_read.py`** — new file. Read-only smoke test. Calls `gmail_service.read_inbox(query=SMARTSHEET_QUERY, max_results=5)` and prints sender/subject/date. Supports `--query` and `--max` flags. Designed to be the first thing run if/when ACC IT authorizes any Gmail auth path for the agent.
+- **`tests/test_reply_processor.py`** — two assertions updated from `"admin@cgcs-acc.org"` to `"austin.wells@austincc.edu"` to match the new `EDIT_LOOP_LIMIT_MESSAGE` and the `process_email_reply` limit branch.
+- **`tests/test_date_utils.py`** — `test_escalation_recipients` updated to assert length 2 and presence of Michelle + Austin (now that `admin@cgcs-acc.org` is removed).
+- **`PROJECT_STATE.md`** — new section `0a. ARCHITECTURE PIVOT — 2026-05-28` inserted before the existing TL;DR. Records: the dead mailbox state, the in-prod `/intake` paste-in trigger, the cleanup landed this commit, and the three concrete asks any of which would unlock a return to email-reading (cross-org DWD on `austincc.edu`, OAuth refresh-token consent, or a service account inside an ACC-owned GCP project — all previously refused by ACC IT). Points at `~/.claude/plans/i-want-you-to-typed-rossum.md` for the full debugging trace.
+
+**Not changed (intentional):**
+
+- The local `.env` (gitignored) was NOT flipped. Production keeps `GMAIL_DELEGATED_USER=admin@cgcs-acc.org` until ACC IT authorizes a new path; flipping it now would just produce an `unauthorized_client` error from Google. The `config.py` *default* is updated so a fresh checkout or a missing env var fails loudly on the right identity.
+- `SMARTSHEET_QUERY` in `smartsheet_inbox_poller.py` was NOT changed. The `is:unread` race (Austin marks notices read in Gmail before the poller picks them up) only matters once email-reading is actually live again. Flagged in `PROJECT_STATE.md` for the eventual cutover — recommended replacement is a Gmail-filter-applied label like `label:cgcs-intake-pending`.
+- `cgcs-acc.org` was left in `cgcs-dashboard/.env:ALLOWED_EMAIL_DOMAINS`. Removing it would lock anyone with a legacy CGCS Google Workspace account out of the dashboard; keep it until the full decommission step in the plan.
+- No OAuth refresh-token branch was added to `gmail_service._get_credentials`. The auth path remains DWD-only because (a) the prior session established ACC blocks OAuth too, and (b) the fallback only matters if Austin re-engages ACC IT and gets a different answer — premature to implement.
+
+**Why:** `admin@cgcs-acc.org` was woven through outbound content as the "system email" — signatures, fallback contact text, CC field, manual-event defaults, escalation recipients. With the mailbox dead, every one of those locations was either misdirecting clients to a black hole or silently dropping data. The cleanup is correct regardless of which auth path eventually wins. The `EMAIL_DRY_RUN` kill switch is added now so the eventual cutover (whenever ACC IT unblocks something) can stage through shadow mode without a code change. The `PROJECT_STATE.md` banner is the most-read doc in the repo for cold-start LLMs — landing the current truth there means the next session doesn't repeat this same investigation.
+
+**Verification once auth is unblocked:** `cd /Users/a2068129/Desktop/ai-intake && source langgraph-agent/.venv/bin/activate && python scripts/test_gmail_read.py` — should print 5 recent Smartsheet notifications from Austin's inbox. If it errors with `unauthorized_client`, the service account's OAuth client ID still isn't authorized for DWD on `austincc.edu`. If it errors with `invalid_grant`, the impersonated user doesn't exist in the target Workspace.
+
+---
 
 ## Tech Stack
 - AI: Claude Sonnet 4 via LangChain Anthropic
