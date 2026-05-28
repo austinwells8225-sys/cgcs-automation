@@ -69,3 +69,4 @@ The CGCS AI intake system has pivoted away from an inbox-polling architecture be
 10. Hey I need you to tell me if there's a diff in the code that hasn't been pushed to main. Enumararte them and summarize it in one paragraph
 11. ok so does the project has claude.md files or memory of what is the goal? y/n
 12. ok. /analyze Do the most robust, detailed and LLM friendly markdown file that summarizes what the state of the project (where the project is right now) and where is it going.
+13. yes build /intake
