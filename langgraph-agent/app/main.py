@@ -21,11 +21,13 @@ from app.db.queries import (
     approve_reservation,
     create_reservation,
     get_dead_letter_entries,
+    create_minimal_reservation,
     get_reservation,
     get_reservation_by_uuid,
     list_reservations,
     reject_reservation,
     update_reservation_category,
+    update_reservation_fields,
     resolve_dead_letter,
 )
 from app.db.budget_queries import (
@@ -196,6 +198,17 @@ async def lifespan(app: FastAPI):
         # in logs and let the operator decide. The endpoints that need the
         # newer schema will 500 with a clearer downstream error.
         logger.exception("Migration runner raised; continuing startup")
+
+    # Fresh data at startup: any 'approved' events whose date has passed
+    # should already read as 'completed' before anyone hits the dashboard.
+    try:
+        from app.db.queries import auto_complete_past_events
+        n = await auto_complete_past_events()
+        if n:
+            logger.info("Auto-completed %d past events at startup", n)
+    except Exception:
+        logger.exception("Startup auto-complete failed (continueOnFail)")
+
     start_scheduler(compiled_graph)
     yield
     logger.info("Shutting down: stopping scheduler")
@@ -569,6 +582,48 @@ async def get_reservation_full(
                 row[k] = json.loads(v)
             except Exception:
                 pass
+    return row
+
+
+@app.post("/api/v1/reservations")
+async def create_reservation_endpoint(
+    payload: dict,
+    _auth: str = Security(verify_api_key),
+):
+    """Create a new reservation from a dashboard P.E.T. row.
+
+    Body: {event_name, requested_date, requested_start_time, requested_end_time,
+           ...any other allowed fields...}
+    """
+    try:
+        row = await create_minimal_reservation(payload)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    if not row:
+        raise HTTPException(status_code=500, detail="Insert returned no row")
+    for k, v in list(row.items()):
+        if hasattr(v, "isoformat"):
+            row[k] = v.isoformat()
+    return row
+
+
+@app.patch("/api/v1/reservations/{reservation_id}")
+async def update_reservation_endpoint(
+    reservation_id: str,
+    updates: dict,
+    _auth: str = Security(verify_api_key),
+):
+    """Update one or more fields on a reservation. Body is a flat dict of
+    field -> new value. Whitelist enforced server-side. Returns the touched row.
+    """
+    if not isinstance(updates, dict) or not updates:
+        raise HTTPException(status_code=400, detail="Body must be a non-empty object")
+    try:
+        row = await update_reservation_fields(reservation_id, updates)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    if not row:
+        raise HTTPException(status_code=404, detail="Reservation not found")
     return row
 
 

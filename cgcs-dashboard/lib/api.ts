@@ -137,6 +137,16 @@ export type Reservation = {
   source?: string | null;
   cgcs_lead?: string | null;
   created_at?: string | null;
+  // Source metadata fields extracted for the P.E.T. view
+  meta_ad_astra?: string | null;
+  meta_tdx?: string | null;
+  meta_layout?: string | null;
+  meta_walkthrough?: string | null;
+  meta_invoice?: string | null;
+  meta_av?: string | null;
+  meta_catering?: string | null;
+  meta_poc_email?: string | null;
+  meta_poc_phone?: string | null;
 };
 
 export type ReservationFull = Reservation & {
@@ -175,6 +185,25 @@ export function updateReservationCategory(
   const q = new URLSearchParams({ category });
   return agentFetch(`/api/v1/reservations/${id}/category?${q.toString()}`, {
     method: "PATCH",
+  });
+}
+
+export function updateReservationFields(
+  id: string,
+  updates: Record<string, unknown>,
+): Promise<{ id: string; event_name: string }> {
+  return agentFetch(`/api/v1/reservations/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify(updates),
+  });
+}
+
+export function createReservation(
+  payload: Record<string, unknown>,
+): Promise<{ id: string; request_id: string; event_name: string }> {
+  return agentFetch(`/api/v1/reservations`, {
+    method: "POST",
+    body: JSON.stringify(payload),
   });
 }
 

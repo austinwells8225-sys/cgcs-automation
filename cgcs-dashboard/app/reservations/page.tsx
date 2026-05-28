@@ -1,6 +1,8 @@
 import Link from "next/link";
 import { getReservations, type Reservation } from "@/lib/api";
 import { CategoryEditor } from "./CategoryEditor";
+import { InlineText, InlineNumber, InlineDate, InlineSelect } from "./InlineEditor";
+import { NewEventButton } from "./NewEventButton";
 
 export const dynamic = "force-dynamic";
 
@@ -129,6 +131,23 @@ const CATEGORY_TITLE: Record<string, string> = {
   monetization: "Monetization (paid space rentals)",
 };
 
+// Austin's spreadsheet uses S/A/C single-letter codes. Map them to category.
+const CATEGORY_LETTER: Record<string, string> = {
+  cgcs: "C",
+  acc: "S",
+  monetization: "A",
+};
+
+// Season tinting from the original P.E.T. spreadsheet color key.
+function seasonTint(dateISO: string): string {
+  if (!dateISO) return "";
+  const month = parseInt(dateISO.slice(5, 7), 10); // 1-12
+  if (month >= 3 && month <= 5) return "bg-green-50/60";    // Spring
+  if (month >= 6 && month <= 8) return "bg-yellow-50/70";   // Summer
+  if (month >= 9 && month <= 11) return "bg-amber-100/50";  // Fall (light brown)
+  return ""; // Winter — no tint
+}
+
 function fmtDateUS(s: string): string {
   if (!s) return "";
   const d = new Date(s + "T00:00:00Z");
@@ -206,8 +225,9 @@ export default async function ReservationsPage({
 
   return (
     <div className="space-y-6">
-      <header>
-        <h1 className="text-2xl font-semibold text-cgcs-ink">Reservations</h1>
+      <header className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-semibold text-cgcs-ink">P.E.T. — Proposed Events Tracker</h1>
         <p className="text-sm text-cgcs-mute">
           {filtered.count} {activeStatus || "total"} record
           {filtered.count === 1 ? "" : "s"}
@@ -244,6 +264,8 @@ export default async function ReservationsPage({
             </>
           )}
         </p>
+        </div>
+        <NewEventButton />
       </header>
 
       <div className="flex flex-wrap gap-2">
@@ -262,8 +284,12 @@ export default async function ReservationsPage({
         ))}
       </div>
 
-      <div className="overflow-hidden rounded-xl bg-white ring-1 ring-cgcs-line">
-        <table className="w-full text-sm">
+      <p className="text-xs text-cgcs-mute">
+        Click any cell to edit. Changes save instantly. Click the event name to open the full detail page.
+      </p>
+
+      <div className="overflow-x-auto rounded-xl bg-white ring-1 ring-cgcs-line">
+        <table className="w-full min-w-[1600px] text-sm">
           <thead className="bg-cgcs-bg text-xs uppercase tracking-wide text-cgcs-mute">
             <tr>
               <SortableHeader label="Date" sortKey="date" activeSort={activeSort} activeDir={activeDir} baseParams={headerBaseParams} />
@@ -274,67 +300,141 @@ export default async function ReservationsPage({
               <SortableHeader label="Status" sortKey="status" activeSort={activeSort} activeDir={activeDir} baseParams={headerBaseParams} />
               <SortableHeader label="Revenue" sortKey="revenue" activeSort={activeSort} activeDir={activeDir} baseParams={headerBaseParams} align="right" />
               <SortableHeader label="Attendees" sortKey="attendees" activeSort={activeSort} activeDir={activeDir} baseParams={headerBaseParams} align="right" />
+              <th className="px-3 py-3 text-left">Ad Astra</th>
+              <th className="px-3 py-3 text-left">Layout</th>
+              <th className="px-3 py-3 text-left">Walkthrough</th>
+              <th className="px-3 py-3 text-left">AV</th>
+              <th className="px-3 py-3 text-left">Catering</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-cgcs-line">
             {rows.length === 0 && (
               <tr>
-                <td colSpan={8} className="px-4 py-8 text-center text-cgcs-mute">
+                <td colSpan={13} className="px-4 py-8 text-center text-cgcs-mute">
                   No reservations match this filter.
                 </td>
               </tr>
             )}
             {rows.map((r: Reservation) => {
-              const href = `/reservations/${r.id}`;
-              const cellCls = "px-4 py-3 align-top";
-              const linkCls = "block";
+              const cellCls = "px-2 py-2 align-top";
+              const tint = seasonTint(r.requested_date);
               return (
-                <tr key={r.id} className="hover:bg-cgcs-bg/50">
+                <tr key={r.id} className={`${tint} hover:bg-cgcs-bg/40`}>
+                  {/* Date — inline editable */}
                   <td className={cellCls}>
-                    <Link href={href} className={`${linkCls} text-cgcs-ink`}>
-                      <div className="font-medium">{fmtDate(r.requested_date)}</div>
-                      <div className="text-xs text-cgcs-mute">
-                        {fmtTimeRange(r.requested_start_time, r.requested_end_time)}
-                      </div>
-                    </Link>
+                    <InlineDate
+                      id={r.id}
+                      field="requested_date"
+                      value={r.requested_date}
+                      display={
+                        <div>
+                          <div className="font-medium">{fmtDate(r.requested_date)}</div>
+                          <div className="text-xs text-cgcs-mute">
+                            {fmtTimeRange(r.requested_start_time, r.requested_end_time)}
+                          </div>
+                        </div>
+                      }
+                    />
                   </td>
+                  {/* Event — clickable to detail */}
                   <td className={cellCls}>
-                    <Link href={href} className={`${linkCls} text-cgcs-ink`}>
+                    <Link
+                      href={`/reservations/${r.id}`}
+                      className="block rounded px-1.5 py-0.5 text-cgcs-ink hover:bg-cgcs-bg/70"
+                    >
                       <div className="font-medium">{r.event_name}</div>
                       {r.room_requested && (
                         <div className="text-xs text-cgcs-mute">{r.room_requested}</div>
                       )}
                     </Link>
                   </td>
+                  {/* Lead — inline editable text */}
                   <td className={cellCls}>
-                    <Link href={href} className={`${linkCls} text-cgcs-ink`}>
-                      {r.cgcs_lead || <span className="text-cgcs-mute">—</span>}
-                    </Link>
+                    <InlineText id={r.id} field="cgcs_lead" value={r.cgcs_lead} placeholder="Assign…" />
                   </td>
+                  {/* Org — inline editable */}
                   <td className={cellCls}>
-                    <Link href={href} className={`${linkCls} text-cgcs-mute`}>
-                      {r.requester_organization || "—"}
-                    </Link>
+                    <InlineText
+                      id={r.id}
+                      field="requester_organization"
+                      value={r.requester_organization}
+                      className="text-cgcs-mute"
+                    />
                   </td>
+                  {/* Tier — category editor with S/A/C letter prefix */}
                   <td className={cellCls}>
-                    <CategoryEditor id={r.id} current={r.event_category} />
+                    <div className="flex items-center gap-1.5">
+                      {r.event_category && (
+                        <span
+                          className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-cgcs-ink text-[10px] font-bold text-white"
+                          title={`Letter code: ${CATEGORY_LETTER[r.event_category] ?? "?"}`}
+                        >
+                          {CATEGORY_LETTER[r.event_category] ?? "?"}
+                        </span>
+                      )}
+                      <CategoryEditor id={r.id} current={r.event_category} />
+                    </div>
                   </td>
+                  {/* Status — inline editable dropdown */}
                   <td className={cellCls}>
-                    <Link href={href} className={linkCls}>
-                      <span
-                        className={`inline-flex rounded-full px-2 py-0.5 text-xs ring-1 ${
-                          STATUS_COLOR[r.status] ?? "bg-gray-50 text-gray-600 ring-gray-200"
-                        }`}
-                      >
-                        {r.status === "pending_review" ? "pending" : r.status}
-                      </span>
-                    </Link>
+                    <InlineSelect
+                      id={r.id}
+                      field="status"
+                      value={r.status}
+                      options={[
+                        { value: "approved", label: "Upcoming" },
+                        { value: "completed", label: "Completed" },
+                        { value: "cancelled", label: "Cancelled" },
+                        { value: "rejected", label: "Declined" },
+                        { value: "pending_review", label: "Pending" },
+                      ]}
+                      display={
+                        <span
+                          className={`inline-flex rounded-full px-2 py-0.5 text-xs ring-1 ${
+                            STATUS_COLOR[r.status] ?? "bg-gray-50 text-gray-600 ring-gray-200"
+                          }`}
+                        >
+                          {r.status === "pending_review" ? "pending" : r.status}
+                        </span>
+                      }
+                    />
                   </td>
-                  <td className={`${cellCls} text-right text-cgcs-ink`}>
-                    <Link href={href} className={linkCls}>{fmtMoney(r.actual_revenue)}</Link>
+                  {/* Revenue — inline number */}
+                  <td className={cellCls}>
+                    <InlineNumber
+                      id={r.id}
+                      field="actual_revenue"
+                      value={r.actual_revenue as number | null | undefined}
+                      display={<span className="text-cgcs-ink">{fmtMoney(r.actual_revenue)}</span>}
+                    />
                   </td>
-                  <td className={`${cellCls} text-right text-cgcs-ink`}>
-                    <Link href={href} className={linkCls}>{r.actual_attendance ?? "—"}</Link>
+                  {/* Attendees — inline number */}
+                  <td className={cellCls}>
+                    <InlineNumber
+                      id={r.id}
+                      field="actual_attendance"
+                      value={r.actual_attendance}
+                    />
+                  </td>
+                  {/* Ad Astra — metadata text */}
+                  <td className={cellCls}>
+                    <InlineText id={r.id} field="ad_astra" value={r.meta_ad_astra} />
+                  </td>
+                  {/* Layout — metadata text */}
+                  <td className={cellCls}>
+                    <InlineText id={r.id} field="floor_layout" value={r.meta_layout} />
+                  </td>
+                  {/* Walkthrough — metadata text */}
+                  <td className={cellCls}>
+                    <InlineText id={r.id} field="walkthrough" value={r.meta_walkthrough} />
+                  </td>
+                  {/* AV — metadata text */}
+                  <td className={cellCls}>
+                    <InlineText id={r.id} field="av" value={r.meta_av} />
+                  </td>
+                  {/* Catering — metadata text */}
+                  <td className={cellCls}>
+                    <InlineText id={r.id} field="catering" value={r.meta_catering} />
                   </td>
                 </tr>
               );

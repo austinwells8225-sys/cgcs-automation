@@ -15,6 +15,7 @@ from typing import Optional
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
+from app.db.queries import auto_complete_past_events
 from app.services.calendar_sync import sync_range as calendar_sync_range
 from app.services.smartsheet_inbox_poller import poll_smartsheet_inbox
 
@@ -76,6 +77,20 @@ def start_scheduler(compiled_graph) -> Optional[AsyncIOScheduler]:
     else:
         logger.info("Calendar sync DISABLED via env var")
 
+    # Auto-complete past approved events. Runs hourly + once at startup so
+    # the P.E.T. table reflects the calendar reality without admin action.
+    scheduler.add_job(
+        _auto_complete_job,
+        trigger="interval",
+        hours=1,
+        id="auto_complete_past_events",
+        name="Mark past 'approved' events as completed",
+        max_instances=1,
+        coalesce=True,
+        next_run_time=__import__("datetime").datetime.now(),  # fire once immediately
+    )
+    logger.info("Scheduled auto_complete_past_events hourly")
+
     scheduler.start()
     _scheduler = scheduler
     logger.info("Scheduler started with %d job(s)", len(scheduler.get_jobs()))
@@ -99,6 +114,15 @@ def shutdown_scheduler() -> None:
 def get_scheduler() -> Optional[AsyncIOScheduler]:
     """Get the running scheduler instance (for introspection / manual triggers)."""
     return _scheduler
+
+
+async def _auto_complete_job() -> None:
+    try:
+        n = await auto_complete_past_events()
+        if n:
+            logger.info("Auto-completed %d past events", n)
+    except Exception:
+        logger.exception("auto_complete job crashed (caught, scheduler keeps running)")
 
 
 async def _calendar_sync_job() -> None:
