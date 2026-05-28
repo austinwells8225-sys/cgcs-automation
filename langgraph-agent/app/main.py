@@ -1860,8 +1860,8 @@ async def webhook_smartsheet_new_entry(
     request_id = f"ss-{uuid.uuid4().hex[:12]}"
     logger.info("Smartsheet intake webhook: %s", request_id)
 
-    # 1. Validate Smartsheet email
-    if not is_smartsheet_intake(body.subject, body.sender):
+    # 1. Validate Smartsheet email (bypassable via force=true for manual /intake)
+    if not body.force and not is_smartsheet_intake(body.subject, body.sender):
         return {"request_id": request_id, "status": "skipped", "reason": "Not a Smartsheet intake email"}
 
     # 2. Parse

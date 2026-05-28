@@ -513,6 +513,10 @@ class SmartsheetWebhookRequest(BaseModel):
     body: str
     sender: str
     date: Optional[str] = None
+    # When true, skip the "looks like a Smartsheet email" sniffer.
+    # Used by the /intake dashboard page since a human has already
+    # decided the pasted content should be processed.
+    force: bool = False
 
 class EmailReplyWebhookRequest(BaseModel):
     thread_id: str

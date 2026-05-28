@@ -44,7 +44,7 @@ export async function processIntakeEmailAction(
         "Content-Type": "application/json",
         "X-Webhook-Secret": WEBHOOK_SECRET,
       },
-      body: JSON.stringify({ subject, sender, body }),
+      body: JSON.stringify({ subject, sender, body, force: true }),
       cache: "no-store",
       signal: controller.signal,
     });
