@@ -327,10 +327,10 @@ async def list_reservations(
         args.append(category)
         where_parts.append(f"event_category = ${len(args)}::cgcs.event_category")
     if date_from:
-        args.append(date_from)
+        args.append(_coerce_date(date_from))
         where_parts.append(f"requested_date >= ${len(args)}::date")
     if date_to:
-        args.append(date_to)
+        args.append(_coerce_date(date_to))
         where_parts.append(f"requested_date < ${len(args)}::date")
     where_sql = ("WHERE " + " AND ".join(where_parts)) if where_parts else ""
 
@@ -339,7 +339,8 @@ async def list_reservations(
         SELECT id, request_id, event_name, requester_organization,
                requested_date, requested_start_time, requested_end_time,
                room_requested, status, event_category, event_subtype,
-               actual_revenue, actual_attendance, source, cgcs_lead, created_at,
+               actual_revenue, actual_attendance, estimated_attendees,
+               source, cgcs_lead, created_at,
                source_metadata->>'ad_astra'         AS meta_ad_astra,
                source_metadata->>'tdx'              AS meta_tdx,
                source_metadata->>'floor_layout'     AS meta_layout,

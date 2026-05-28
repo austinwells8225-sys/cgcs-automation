@@ -134,6 +134,7 @@ export type Reservation = {
   event_subtype?: string | null;
   actual_revenue?: string | number | null;
   actual_attendance?: number | null;
+  estimated_attendees?: number | null;
   source?: string | null;
   cgcs_lead?: string | null;
   created_at?: string | null;
