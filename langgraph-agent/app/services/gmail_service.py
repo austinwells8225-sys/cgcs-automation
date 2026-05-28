@@ -1,8 +1,13 @@
 """Gmail API service — send, read, and manage emails via Google Workspace.
 
-Uses service account with domain-wide delegation to impersonate
-the CGCS admin mailbox. Requires GOOGLE_SERVICE_ACCOUNT_FILE env var
-and GMAIL_DELEGATED_USER for the impersonated address.
+Uses a service account with domain-wide delegation to impersonate the
+configured GMAIL_DELEGATED_USER. Requires GOOGLE_SERVICE_ACCOUNT_FILE
+env var and a delegated-user address authorized for DWD in the target
+Workspace.
+
+When settings.email_dry_run is true, send_email and reply_to_thread are
+short-circuited to log-only. create_draft_reply is unaffected — drafts
+never leave the Drafts folder.
 """
 
 from __future__ import annotations
@@ -182,11 +187,21 @@ async def send_email(
     bcc: str | None = None,
     attachments: list[dict] | None = None,
 ) -> dict:
-    """Send an email from admin@cgcs-acc.org.
+    """Send an email from the configured GMAIL_DELEGATED_USER.
+
+    When settings.email_dry_run is true, returns a synthetic id and logs
+    the would-have-been recipient instead of calling the Gmail API.
 
     Returns:
         {"message_id": str, "thread_id": str}
     """
+    if settings.email_dry_run:
+        logger.warning(
+            "EMAIL_DRY_RUN=true — skipping send_email to=%s subject=%r",
+            to, subject,
+        )
+        return {"message_id": "DRY_RUN", "thread_id": "DRY_RUN"}
+
     def _send():
         service = _get_gmail_service()
         message = _build_mime_message(to, subject, body, cc=cc, bcc=bcc, attachments=attachments)
@@ -278,9 +293,18 @@ async def reply_to_thread(
 ) -> dict:
     """Reply within an existing email thread.
 
+    Honors settings.email_dry_run — short-circuits to log-only when true.
+
     Returns:
         {"message_id": str, "thread_id": str}
     """
+    if settings.email_dry_run:
+        logger.warning(
+            "EMAIL_DRY_RUN=true — skipping reply_to_thread thread=%s to=%s",
+            thread_id, to,
+        )
+        return {"message_id": "DRY_RUN", "thread_id": thread_id}
+
     def _reply():
         service = _get_gmail_service()
 
@@ -325,7 +349,7 @@ async def create_draft(
     bcc: str | None = None,
     attachments: list[dict] | None = None,
 ) -> dict:
-    """Create a Gmail draft (NOT sent) in admin@cgcs-acc.org's Drafts folder.
+    """Create a Gmail draft (NOT sent) in the delegated user's Drafts folder.
 
     Use this for AI-generated replies that need human review before sending.
     Austin opens Gmail, sees the draft, edits, hits Send.

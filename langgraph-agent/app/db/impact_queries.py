@@ -196,7 +196,7 @@ async def create_manual_event(
     requested_start_time,
     requested_end_time,
     requester_name: str = "CGCS",
-    requester_email: str = "admin@cgcs-acc.org",
+    requester_email: str = "austin.wells@austincc.edu",
     requester_organization: str | None = "CGCS",
     estimated_attendees: int | None = None,
     actual_attendance: int | None = None,

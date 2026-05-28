@@ -66,8 +66,10 @@ def get_labor_rate(staff_name: str) -> float:
 ADMIN_EMAIL = "austin.wells@austincc.edu"
 ADMIN_TITLE = "Strategic Planner for Community Relations & Environmental Affairs"
 
-# Google Workspace system email (primary)
-CGCS_SYSTEM_EMAIL = "admin@cgcs-acc.org"
+# System email used as the outbound sender / CC on coordination drafts.
+# admin@cgcs-acc.org is retired (ACC firewall blocks delivery); Austin's
+# ACC mailbox is the live trigger inbox.
+CGCS_SYSTEM_EMAIL = "austin.wells@austincc.edu"
 
 CGCS_WEBSITE = "https://www.cgcsacc.org"
 
@@ -108,7 +110,6 @@ MOVING_TEAM_CC = "michelle.raymond@austincc.edu"
 
 ESCALATION_RECIPIENTS = [
     "michelle.raymond@austincc.edu",
-    "admin@cgcs-acc.org",
     "austin.wells@austincc.edu",
 ]
 

@@ -1468,7 +1468,7 @@ async def manual_event(
         requested_start_time=_parse_time(payload.requested_start_time),
         requested_end_time=_parse_time(payload.requested_end_time),
         requester_name=payload.requester_name or "CGCS",
-        requester_email=payload.requester_email or "admin@cgcs-acc.org",
+        requester_email=payload.requester_email or "austin.wells@austincc.edu",
         requester_organization=payload.requester_organization,
         estimated_attendees=payload.estimated_attendees,
         actual_attendance=payload.actual_attendance,

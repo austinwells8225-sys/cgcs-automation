@@ -1,9 +1,10 @@
 """Smartsheet inbox poller — Gmail → agent → draft.
 
-Scans admin@cgcs-acc.org's inbox for unread Smartsheet event notifications,
-runs them through the existing intake graph, and saves the agent's drafted
-reply as a Gmail Draft threaded to the original email. Marks originals as
-read so we don't reprocess.
+Scans the configured GMAIL_DELEGATED_USER inbox (austin.wells@austincc.edu
+in current production — admin@cgcs-acc.org is retired) for unread Smartsheet
+event notifications, runs them through the existing intake graph, and saves
+the agent's drafted reply as a Gmail Draft threaded to the original email.
+Marks originals as read so we don't reprocess.
 
 Runs on a schedule (see scheduler). Purely additive — does not send
 anything, only drafts. Human review happens in Gmail.

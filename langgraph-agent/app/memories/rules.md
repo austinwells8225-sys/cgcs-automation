@@ -88,7 +88,7 @@
 - Leave them alone for Austin to handle manually
 
 ## Reply Drafting Rules
-- All outbound emails from admin@cgcs-acc.org via Gmail API
+- All outbound emails from austin.wells@austincc.edu via Gmail API (admin@cgcs-acc.org retired — ACC firewall blocks delivery)
 - Generate 3+ suggested replies per intake
 - Attach both user agreement PDFs to initial responses
 - Send parking map early in the process

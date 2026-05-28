@@ -273,7 +273,7 @@ def _draft_easy_response(
         f"CGCS Team\n"
         f"Center for Government & Civic Service\n"
         f"Austin Community College \u2014 Rio Grande Campus\n"
-        f"admin@cgcs-acc.org | www.cgcsacc.org"
+        f"austin.wells@austincc.edu | www.cgcsacc.org"
     )
 
 
@@ -323,7 +323,7 @@ def _draft_review_response(
         f"CGCS Team\n"
         f"Center for Government & Civic Service\n"
         f"Austin Community College \u2014 Rio Grande Campus\n"
-        f"admin@cgcs-acc.org | www.cgcsacc.org"
+        f"austin.wells@austincc.edu | www.cgcsacc.org"
     )
 
 

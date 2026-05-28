@@ -384,8 +384,8 @@ class TestNewConstants:
         assert "@" in MOVING_TEAM_CC
 
     def test_escalation_recipients(self):
-        assert len(ESCALATION_RECIPIENTS) == 3
-        assert "admin@cgcs-acc.org" in ESCALATION_RECIPIENTS
+        assert len(ESCALATION_RECIPIENTS) == 2
+        assert "michelle.raymond@austincc.edu" in ESCALATION_RECIPIENTS
         assert "austin.wells@austincc.edu" in ESCALATION_RECIPIENTS
 
     def test_intern_emails_count(self):

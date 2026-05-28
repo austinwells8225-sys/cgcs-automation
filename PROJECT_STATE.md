@@ -13,6 +13,31 @@ audience: LLMs and engineers picking up the project cold
 
 ---
 
+## 0a. ARCHITECTURE PIVOT — 2026-05-28
+
+**`admin@cgcs-acc.org` is dead.** ACC's email firewall rejects mail addressed to it. The Gmail-filter forwarding bridge (Smartsheet → `austin.wells@austincc.edu` → filter → `admin@cgcs-acc.org` → poller) is broken end-to-end.
+
+**Current production trigger** (unchanged this commit): manual paste-in via `cgcs-dashboard/app/intake/`. Austin pastes the Smartsheet "Notice of Event Space Request" body + subject; a server action POSTs to `POST /webhook/smartsheet-new-entry`; the `smartsheet_intake` subgraph runs unchanged. This was adopted earlier when the prior session confirmed ACC Workspace blocks every Google API path the agent needs — GCP project creation on `austincc.edu`, App Passwords, third-party OAuth app access, and Domain-Wide Delegation are all locked or unavailable.
+
+**What this commit cleaned up (admin@cgcs-acc.org references that needed to die regardless of auth path).**
+- All hardcoded `admin@cgcs-acc.org` references in outbound content (signatures in `intake_classifier.py`, fallback text in `reply_processor.py`, `CGCS_SYSTEM_EMAIL`/`ESCALATION_RECIPIENTS` in `cgcs_constants.py`, default `requester_email` in `models.py` / `main.py` / `impact_queries.py`) → swapped to `austin.wells@austincc.edu`. Outbound drafts no longer point clients at a black-hole inbox.
+- New `EMAIL_DRY_RUN` kill switch in `app/config.py` → guards `send_email` and `reply_to_thread` in `gmail_service.py`. `create_draft_reply` is unaffected. Use during any future cutover.
+- `config.py` default for `gmail_delegated_user` is now `austin.wells@austincc.edu` so any future Gmail attempt fails loudly on the *right* identity instead of silently impersonating the dead mailbox.
+- New `scripts/test_gmail_read.py` — read-only smoke test for the auth path. If ACC IT ever opens DWD/OAuth, this is the first thing to run.
+
+**What's still blocked.** Going back to inbox-as-trigger requires re-engaging ACC IT (Michelle Raymond) on one of:
+1. Cross-org DWD for service account client ID `117961396421652014052` on `austincc.edu`, scopes `gmail.readonly/modify/compose/send` — previously refused.
+2. OAuth refresh-token flow via Austin's own consent — needs ACC to allow third-party OAuth apps for Austin's account; also previously locked.
+3. Service account inside an ACC-owned GCP project — needs ACC IT to permit GCP project creation on `austincc.edu`; refused.
+
+**Until ACC opens one of those paths, `/intake` paste-in is the production trigger.** The code is now in a clean state to flip back to email-reading the moment any of (1)–(3) becomes available — single env var change (`GMAIL_DELEGATED_USER`) + restart for path (1); branch in `gmail_service._get_credentials` for path (2).
+
+**Race risk to flag (only relevant once email-reading is back).** The poller uses `is:unread`. Austin will see Smartsheet notices in his personal inbox before the poll runs and may mark them read, causing skips. Before any cutover, swap `is:unread` in `langgraph-agent/app/services/smartsheet_inbox_poller.py:SMARTSHEET_QUERY` for a Gmail-filter-applied label (e.g. `label:cgcs-intake-pending`).
+
+Full debugging trace and plan: `~/.claude/plans/i-want-you-to-typed-rossum.md`.
+
+---
+
 ## 0. TL;DR
 
 - **What it is:** An AI agent + ops dashboard that automates event-space intake, eligibility evaluation, pricing, calendar holds, email triage/replies, reminders, and impact reporting for the **Center for Government & Civic Service (CGCS)** at Austin Community College.

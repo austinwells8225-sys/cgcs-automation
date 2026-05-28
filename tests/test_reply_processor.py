@@ -54,7 +54,7 @@ class TestEditLoop:
 
     def test_limit_message_has_contact_info(self):
         result = check_edit_loop(9)
-        assert "admin@cgcs-acc.org" in result["limit_message"]
+        assert "austin.wells@austincc.edu" in result["limit_message"]
         assert "(512) 983-3679" in result["limit_message"]
 
     def test_max_constant(self):
@@ -311,7 +311,7 @@ class TestProcessEmailReplyNode:
         result = process_email_reply(state)
         assert result["edit_loop_count"] == 10
         assert result["reply_action"] == "edit_loop_limit"
-        assert "admin@cgcs-acc.org" in result["draft_response"]
+        assert "austin.wells@austincc.edu" in result["draft_response"]
         assert result["email_auto_send"] is True
 
     def test_escalation_overrides_changes(self):

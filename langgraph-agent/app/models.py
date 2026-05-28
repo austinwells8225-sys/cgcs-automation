@@ -611,7 +611,7 @@ class ManualEventRequest(BaseModel):
     requested_start_time: str  # HH:MM
     requested_end_time: str  # HH:MM
     requester_name: Optional[str] = "CGCS"
-    requester_email: Optional[str] = "admin@cgcs-acc.org"
+    requester_email: Optional[str] = "austin.wells@austincc.edu"
     requester_organization: Optional[str] = "CGCS"
     estimated_attendees: Optional[int] = None
     actual_attendance: Optional[int] = None

@@ -35,7 +35,15 @@ class Settings(BaseSettings):
     pet_tracker_spreadsheet_id: str = ""
 
     # --- Gmail (domain-wide delegation) ---
-    gmail_delegated_user: str = "admin@cgcs-acc.org"
+    # admin@cgcs-acc.org is retired (ACC firewall blocks delivery). Default is
+    # the live trigger inbox; production flips this once ACC Workspace admin
+    # authorizes DWD for the @austincc.edu domain.
+    gmail_delegated_user: str = "austin.wells@austincc.edu"
+
+    # --- Email kill switch ---
+    # When true, send_email and reply_to_thread are short-circuited to
+    # log-only. create_draft_reply is always allowed (drafts are safe).
+    email_dry_run: bool = False
 
     # --- Email auto-send allowlist ---
     email_auto_send_allowlist: str = "stefano.casafrancalaos@austincc.edu,marisela.perez@austincc.edu"

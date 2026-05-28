@@ -22,7 +22,7 @@ from app.services.intake_processor import (
 EDIT_LOOP_MAX = 10
 EDIT_LOOP_LIMIT_MESSAGE = (
     "We've reached the limit of changes we can process through this channel. "
-    "Please contact us directly at admin@cgcs-acc.org or call (512) 983-3679 "
+    "Please contact us directly at austin.wells@austincc.edu or call (512) 983-3679 "
     "to finalize your event details."
 )
 
