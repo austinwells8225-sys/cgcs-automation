@@ -4,7 +4,7 @@
 CGCS Unified Agent (ai-intake)
 
 ## Overview
-AI automation engine for the Center for Government & Civic Service at Austin Community College. Polls admin@cgcs-acc.org for Smartsheet event-space requests, classifies each as easy/mid/hard, creates a Google Calendar HOLD, appends a P.E.T. tracker row, and saves a Gmail draft reply (plus optional furniture/police drafts) for human approval.
+AI automation engine for the Center for Government & Civic Service at Austin Community College. Ingests Smartsheet event-space requests via a manual paste-in `/intake` form on the dashboard (the prior admin@cgcs-acc.org Gmail poller is retired — ACC firewall blocks the mailbox and ACC Workspace blocks every Google API path the agent needed), classifies each as easy/mid/hard, creates a Google Calendar HOLD, writes a P.E.T. row to Postgres, and produces a reply draft (plus optional furniture/police coordination drafts) staged for human review.
 
 ## Tech Stack
 - AI: Claude Sonnet 4 via LangChain Anthropic
